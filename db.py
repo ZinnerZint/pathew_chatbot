@@ -16,7 +16,8 @@ def get_conn():
 def search_places(category=None, tambon=None, limit=10):
     sql = """
     SELECT id, name, tambon, category, description, highlight,
-           latitude, longitude, image_url
+           latitude, longitude, image_url,
+           COALESCE(image_urls, '[]'::jsonb) AS image_urls
     FROM places
     WHERE (%(cat)s IS NULL OR category ILIKE %(cat_like)s)
       AND (%(tmb)s IS NULL OR tambon ILIKE %(tmb_like)s)

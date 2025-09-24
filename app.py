@@ -2,6 +2,7 @@ import streamlit as st
 from chatbot import get_answer
 from config import MAPS_API_KEY
 from urllib.parse import quote
+import json
 
 # ---------- Page setup ----------
 st.set_page_config(page_title="Pathew Chatbot", page_icon="🌴", layout="centered")
@@ -11,8 +12,7 @@ st.markdown(
 )
 st.caption("ถามได้เลย เช่น: *ร้านอาหารราคาถูกแถวบางสน*, *มีปั๊มน้ำมันใกล้ๆ ไหม*")
 
-# ---------- Colored avatars (no emoji) ----------
-# วาดวงกลมสีด้วย SVG แล้วฝังเป็น data URI (ขนาด 40x40 ดูคมชัดบนจอ HiDPI)
+# ---------- Colored avatars ----------
 svg_user = """<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'>
   <circle cx='20' cy='20' r='18' fill='#3B82F6'/>
 </svg>"""
@@ -53,7 +53,6 @@ if user_input:
             for p in places:
                 name = p.get("name", "-")
                 desc = (p.get("description") or "").strip()
-                img = p.get("image_url")
                 lat, lng = p.get("latitude"), p.get("longitude")
                 map_link = f"https://www.google.com/maps?q={lat},{lng}" if lat and lng else None
 
@@ -61,22 +60,45 @@ if user_input:
                     cols = st.columns([1, 2])
                     with cols[0]:
                         shown = False
-                        # 1) แสดงรูปจากฐานข้อมูลถ้ามี
-                        if isinstance(img, str) and img.startswith("http"):
+
+                        # ----- แสดงหลายรูป -----
+                        images_raw = p.get("image_urls") or []
+                        if isinstance(images_raw, str):
+                            try:
+                                images = json.loads(images_raw)
+                            except Exception:
+                                images = []
+                        else:
+                            images = images_raw
+
+                        urls = [u for u in images if isinstance(u, str) and u.startswith("http")]
+
+                        if urls:
+                            st.image(urls[0], use_container_width=True)
+                            shown = True
+                            if len(urls) > 1:
+                                thumbs = urls[1:5]
+                                tcols = st.columns(len(thumbs))
+                                for tcol, u in zip(tcols, thumbs):
+                                    with tcol:
+                                        st.image(u, use_container_width=True)
+
+                        # ถ้าไม่มี image_urls แต่มี image_url เดิม
+                        img = p.get("image_url")
+                        if (not shown) and isinstance(img, str) and img.startswith("http"):
                             st.image(img, use_container_width=True)
                             shown = True
-                        # 2) ถ้าไม่มีรูป แต่มีพิกัด + มีคีย์ → ใช้ Google Static Maps
+
+                        # ถ้าไม่มีรูป → ใช้ Static Maps
                         if (not shown) and lat and lng and MAPS_API_KEY:
                             static_map = (
                                 "https://maps.googleapis.com/maps/api/staticmap"
-                                f"?center={lat},{lng}"
-                                "&zoom=15&size=640x400&maptype=roadmap"
-                                f"&markers=color:red%7C{lat},{lng}"
-                                f"&key={MAPS_API_KEY}"
+                                f"?center={lat},{lng}&zoom=15&size=640x400&maptype=roadmap"
+                                f"&markers=color:red%7C{lat},{lng}&key={MAPS_API_KEY}"
                             )
                             st.image(static_map, use_container_width=True)
                             shown = True
-                        # 3) ถ้าไม่มีอะไรจะแสดงจริงๆ
+
                         if not shown:
                             st.markdown("🖼️ ไม่มีรูป")
 
