@@ -78,7 +78,7 @@ def get_answer(user_input: str) -> Tuple[str, List[Dict]]:
     tambon = analysis.get("tambon")
     keywords = analysis.get("keywords")
 
-    results = search_places(category=category, tambon=tambon, limit=10)
+    results = search_places(category=category, tambon=tambon, keywords=keywords, limit=10)
 
     # ---- กรองผลลัพธ์ด้วย keywords แบบเข้มงวด ----
     if keywords and isinstance(keywords, str):

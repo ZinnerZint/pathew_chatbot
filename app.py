@@ -61,19 +61,12 @@ if user_input:
                     with cols[0]:
                         shown = False
 
-                        # ----- แสดงหลายรูปแบบ robust -----
-                        images_raw = p.get("image_urls") or []
-                        images = []
-
-                        if isinstance(images_raw, str):
-                            try:
-                                images = json.loads(images_raw)
-                            except Exception:
-                                images = []
-                        elif isinstance(images_raw, list):
-                            images = images_raw
-                        elif isinstance(images_raw, dict):
-                            images = list(images_raw.values())
+                        # ----- แสดงหลายรูป robust -----
+                        images_raw = p.get("image_urls") or "[]"
+                        try:
+                            images = json.loads(images_raw) if isinstance(images_raw, str) else images_raw
+                        except Exception:
+                            images = []
 
                         urls = [u for u in images if isinstance(u, str) and u.startswith("http")]
 
@@ -82,7 +75,7 @@ if user_input:
                             st.image(urls[0], use_container_width=True)
                             shown = True
 
-                            # thumbnail (แถวละ 4 รูป)
+                            # thumbnail 4 รูปต่อแถว
                             thumbs = urls[1:]
                             if thumbs:
                                 for i in range(0, len(thumbs), 4):

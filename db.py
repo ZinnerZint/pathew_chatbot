@@ -13,22 +13,29 @@ def get_conn():
         sslmode=cfg.get("sslmode", "require"),
     )
 
-def search_places(category=None, tambon=None, limit=10):
+def search_places(category=None, tambon=None, keywords=None, limit=10):
     sql = """
     SELECT id, name, tambon, category, description, highlight,
            latitude, longitude, image_url,
-           COALESCE(image_urls, '[]'::jsonb) AS image_urls
+           COALESCE(image_urls, '[]'::jsonb)::TEXT AS image_urls
     FROM places
     WHERE (%(cat)s IS NULL OR category ILIKE %(cat_like)s)
       AND (%(tmb)s IS NULL OR tambon ILIKE %(tmb_like)s)
+      AND (%(kw)s IS NULL OR (
+            name ILIKE %(kw_like)s
+         OR description ILIKE %(kw_like)s
+         OR highlight ILIKE %(kw_like)s
+      ))
     ORDER BY name
     LIMIT %(lim)s;
     """
     params = {
         "cat": category,
         "tmb": tambon,
+        "kw": keywords,
         "cat_like": f"%{category}%" if category else None,
         "tmb_like": f"%{tambon}%" if tambon else None,
+        "kw_like": f"%{keywords}%" if keywords else None,
         "lim": limit,
     }
     with get_conn() as conn:
