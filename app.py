@@ -4,6 +4,9 @@ from config import MAPS_API_KEY
 from urllib.parse import quote
 import json
 
+# ---------- ใช้ JS ดึงพิกัดจาก browser ----------
+from streamlit_javascript import st_javascript
+
 # ---------- Page setup ----------
 st.set_page_config(page_title="Pathew Chatbot", page_icon="🌴", layout="centered")
 st.markdown(
@@ -25,8 +28,15 @@ avatar_bot = f"data:image/svg+xml;utf8,{quote(svg_bot)}"
 # ---------- Session state ----------
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "สวัสดีครับ! อยากหาอะไรในปะทิวบอกผมได้เลย"}
+        {"role": "assistant", "content": "สวัสดีครับ! อยากหาอะไรในอำเภอปะทิวบอกผมได้เลย"}
     ]
+
+# ---------- ลองดึงพิกัดผู้ใช้ผ่าน JS ----------
+user_location = st_javascript("navigator.geolocation.getCurrentPosition((pos) => pos.coords);")
+
+if user_location:
+    st.session_state["user_lat"] = user_location.get("latitude")
+    st.session_state["user_lng"] = user_location.get("longitude")
 
 # ---------- Render history ----------
 for msg in st.session_state.messages:
@@ -45,10 +55,15 @@ if user_input:
 
     # -------- Bot response --------
     reply_text, places = get_answer(user_input)
+
+    # ถ้ายังไม่เจอ และเรามีพิกัดผู้ใช้ → บอกผู้ใช้ว่าใช้ตำแหน่งได้
+    if not places and "user_lat" in st.session_state:
+        lat, lng = st.session_state["user_lat"], st.session_state["user_lng"]
+        reply_text += f"\n\n📍 ตรวจพบว่าคุณอยู่ใกล้พิกัด {lat:.5f}, {lng:.5f} ต้องการให้ผมหาสถานที่ใกล้คุณที่สุดไหม?"
+
     with st.chat_message("assistant", avatar=avatar_bot):
         st.markdown(reply_text)
 
-        # แสดงผลลัพธ์เสริมเป็นการ์ด
         if places:
             for p in places:
                 name = p.get("name", "-")
@@ -71,11 +86,9 @@ if user_input:
                         urls = [u for u in images if isinstance(u, str) and u.startswith("http")]
 
                         if urls:
-                            # รูปแรกใหญ่
                             st.image(urls[0], use_container_width=True)
                             shown = True
 
-                            # thumbnail 4 รูปต่อแถว
                             thumbs = urls[1:]
                             if thumbs:
                                 for i in range(0, len(thumbs), 4):
@@ -112,5 +125,4 @@ if user_input:
                         if map_link:
                             st.markdown(f"[🗺️ เปิดแผนที่]({map_link})")
 
-    # เก็บข้อความบอทลง session
     st.session_state.messages.append({"role": "assistant", "content": reply_text})
