@@ -61,7 +61,7 @@ if user_input:
                     with cols[0]:
                         shown = False
 
-                        # ----- แสดงหลายรูป -----
+                        # ----- แสดงหลายรูปจาก image_urls -----
                         images_raw = p.get("image_urls") or []
                         if isinstance(images_raw, str):
                             try:
@@ -74,16 +74,11 @@ if user_input:
                         urls = [u for u in images if isinstance(u, str) and u.startswith("http")]
 
                         if urls:
-                            st.image(urls[0], use_container_width=True)
+                            for u in urls:
+                                st.image(u, use_container_width=True)
                             shown = True
-                            if len(urls) > 1:
-                                thumbs = urls[1:5]
-                                tcols = st.columns(len(thumbs))
-                                for tcol, u in zip(tcols, thumbs):
-                                    with tcol:
-                                        st.image(u, use_container_width=True)
 
-                        # ถ้าไม่มี image_urls แต่มี image_url เดิม
+                        # ถ้าไม่มี image_urls แต่ยังมี image_url เดิม
                         img = p.get("image_url")
                         if (not shown) and isinstance(img, str) and img.startswith("http"):
                             st.image(img, use_container_width=True)
