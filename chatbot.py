@@ -1,5 +1,5 @@
 import json
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 
 import google.generativeai as genai
 from config import GEMINI_API_KEY
@@ -12,17 +12,11 @@ model = genai.GenerativeModel(MODEL_NAME)
 
 
 def _safe_json(text: str) -> dict:
-    """
-    พยายามดึง JSON ออกจากคำตอบของโมเดล
-    รองรับเคสที่ LLM ใส่ ```json ... ```
-    """
     if not text:
         return {}
     t = text.strip()
-    # ตัด code fences ออกถ้ามี
     if t.startswith("```"):
         t = t.strip("`")
-        # ลบชนิดภาษาออก เช่น json\n
         t = "\n".join(t.split("\n")[1:])
     try:
         return json.loads(t)
@@ -31,9 +25,6 @@ def _safe_json(text: str) -> dict:
 
 
 def analyze_query(user_input: str) -> dict:
-    """
-    ใช้ Gemini วิเคราะห์ intent → {"category": "...", "tambon": "...", "price": "...", "keywords": "..."}
-    """
     prompt = f"""
 คุณคือระบบช่วยหาสถานที่ในอำเภอปะทิว จังหวัดชุมพร
 หน้าที่: วิเคราะห์คำถามผู้ใช้แล้วสรุปเป็น JSON เท่านั้น ห้ามมีคำอธิบายอื่น
@@ -45,13 +36,12 @@ def analyze_query(user_input: str) -> dict:
   "category": "ประเภทสถานที่ เช่น ร้านอาหาร/คาเฟ่/ปั๊มน้ำมัน (ไม่รู้ให้ใส่ null)",
   "tambon": "ชื่อตำบลในอำเภอปะทิว (ไม่รู้ให้ใส่ null)",
   "price": "ถูก/ปานกลาง/แพง (ถ้ามี ไม่รู้ให้ใส่ null)",
-  "keywords": "คำค้นเพิ่ม เช่น เมนู/บรรยากาศ (ไม่มีให้ใส่ null)"
+  "keywords": "คำค้นเพิ่ม เช่น ชื่อสถานที่ เมนู หรือบรรยากาศ (ไม่มีให้ใส่ null)"
 }}
 """
     try:
         res = model.generate_content(prompt)
         data = _safe_json(res.text)
-        # ป้องกันคีย์หาย
         return {
             "category": data.get("category"),
             "tambon": data.get("tambon"),
@@ -63,7 +53,6 @@ def analyze_query(user_input: str) -> dict:
 
 
 def _format_one_place(p: Dict) -> str:
-    """สรุป 1 สถานที่ให้เป็นข้อความบรรยายสั้นๆ"""
     name = p.get("name") or "-"
     tambon = p.get("tambon") or "-"
     cat = p.get("category") or ""
@@ -84,43 +73,40 @@ def _format_one_place(p: Dict) -> str:
 
 
 def get_answer(user_input: str) -> Tuple[str, List[Dict]]:
-    """
-    วิเคราะห์ → ค้น DB → สร้างคำตอบสวยๆ
-    return (ข้อความตอบ, รายการสถานที่ที่ดึงได้)
-    """
     analysis = analyze_query(user_input)
     category = analysis.get("category")
     tambon = analysis.get("tambon")
     keywords = analysis.get("keywords")
 
-    # ถ้า LLM วิเคราะห์ได้ไม่พอ ลองค้นแบบกว้างๆ ด้วย category/tambon เฉยๆ
-    results = search_places(category=category, tambon=tambon, limit=5)
+    results = search_places(category=category, tambon=tambon, limit=10)
 
-    # ถ้าอยากแม่นขึ้นอีกนิด ใช้ keywords มาช่วยกรองฝั่ง Python (ไม่บังคับ)
+    # ---- กรองผลลัพธ์ด้วย keywords แบบเข้มงวด ----
     if keywords and isinstance(keywords, str):
-        kw = keywords.lower()
-        def ok(row):
-            text = " ".join([
-                str(row.get("name") or ""),
-                str(row.get("description") or ""),
-                str(row.get("highlight") or ""),
-            ]).lower()
-            return all(k.strip() in text for k in kw.split() if k.strip())
-        filtered = list(filter(ok, results))
-        if filtered:
-            results = filtered
+        kw = [k.strip().lower() for k in keywords.split() if k.strip()]
+        if kw:
+            def ok(row):
+                text = " ".join([
+                    str(row.get("name") or ""),
+                    str(row.get("description") or ""),
+                    str(row.get("highlight") or ""),
+                ]).lower()
+                return all(k in text for k in kw)
+            filtered = list(filter(ok, results))
+            if filtered:
+                results = filtered
 
-    if not (category or tambon):
-        return ("ผมยังระบุประเภท/ตำบลไม่ชัด ลองพิมพ์เช่น “ร้านอาหารราคาถูกแถวบางสน” นะครับ 😊", [])
+    if not (category or tambon or keywords):
+        return ("ผมยังไม่เข้าใจชัด ลองพิมพ์เพิ่ม เช่น “ตลาดเลริวเซ็น ชุมโค” นะครับ 😊", [])
 
     if not results:
         msg = f"ยังไม่พบ{category or 'สถานที่'}"
         if tambon:
             msg += f"ในตำบล{tambon}"
+        if keywords:
+            msg += f" ที่เกี่ยวกับ {keywords}"
         msg += " ตอนนี้เลยครับ ลองเปลี่ยนคำค้นนิดนึงก็ได้ครับ"
         return (msg, [])
 
-    # ทำคำตอบแบบรวมหลายที่
     intro = "เจอที่น่าสนใจให้ครับ:\n\n"
     body = "\n\n".join(_format_one_place(p) for p in results)
     outro = "\n\nอยากให้ปักหมุดเส้นทาง หรือกรองเพิ่ม (เช่น เมนู/งบประมาณ) บอกผมได้เลยครับ"
