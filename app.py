@@ -12,15 +12,17 @@ st.caption("ถามได้เลย เช่น: *ร้านอาหา�
 # ---------- Session state ----------
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "สวัสดีครับ! อยากหาอะไรในปะทิวบอกผมได้เลย 🌴"}
+        {"role": "assistant", "content": "สวัสดีครับ! อยากหาอะไรในปะทิวบอกผมได้เลย"}
     ]
 
 # ---------- Render history ----------
 for msg in st.session_state.messages:
-    avatar = (
-        "dcbba2d5-a589-4987-b3f7-d0dfe7b7fcac.png" if msg["role"] == "user"
-        else "5ced3321-8811-400e-b7f0-832e4e5220c1.png"
-    )
+    # ใช้ HTML วงกลมสีแทน avatar
+    if msg["role"] == "user":
+        avatar = "🔵"  # หรือจะใช้ HTML <span style='color:blue'>●</span>
+    else:
+        avatar = "🟠"
+
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
@@ -28,18 +30,17 @@ for msg in st.session_state.messages:
 user_input = st.chat_input("พิมพ์คำถามเกี่ยวกับสถานที่ในปะทิวได้เลย…")
 
 if user_input:
-    # แสดง + บันทึกฝั่งผู้ใช้
+    # -------- User message --------
     st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user", avatar="dcbba2d5-a589-4987-b3f7-d0dfe7b7fcac.png"):
+    with st.chat_message("user", avatar="🔵"):
         st.markdown(user_input)
 
-    # เรียกสมอง
+    # -------- Bot response --------
     reply_text, places = get_answer(user_input)
-
-    # แสดง + บันทึกฝั่งบอท
-    with st.chat_message("assistant", avatar="5ced3321-8811-400e-b7f0-832e4e5220c1.png"):
+    with st.chat_message("assistant", avatar="🟠"):
         st.markdown(reply_text)
 
+        # แสดงผลลัพธ์เสริมเป็นการ์ด
         if places:
             for p in places:
                 name = p.get("name", "-")
@@ -57,8 +58,11 @@ if user_input:
                             st.markdown("🖼️ ไม่มีรูป")
                     with cols[1]:
                         st.markdown(f"**{name}**  \n{desc or '—'}")
-                        st.markdown(f"**ตำบล:** {p.get('tambon','-')}  |  **ประเภท:** {p.get('category','-')}")
+                        st.markdown(
+                            f"**ตำบล:** {p.get('tambon','-')}  |  **ประเภท:** {p.get('category','-')}"
+                        )
                         if map_link:
                             st.markdown(f"[🗺️ เปิดแผนที่]({map_link})")
 
+    # เก็บข้อความบอทลง session
     st.session_state.messages.append({"role": "assistant", "content": reply_text})
