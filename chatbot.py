@@ -13,6 +13,7 @@ model = genai.GenerativeModel(MODEL_NAME)
 # รายชื่อตำบลในอำเภอปะทิว (ปรับ/เพิ่มได้)
 KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}
 
+
 def _safe_json(text: str) -> dict:
     if not text:
         return {}
@@ -24,6 +25,7 @@ def _safe_json(text: str) -> dict:
         return json.loads(t)
     except Exception:
         return {}
+
 
 def analyze_query(user_input: str) -> dict:
     prompt = f"""
@@ -53,24 +55,6 @@ def analyze_query(user_input: str) -> dict:
     except Exception:
         return {"category": None, "tambon": None, "price": None, "keywords": None}
 
-def _format_one_place(p: Dict) -> str:
-    name = p.get("name") or "-"
-    tambon = p.get("tambon") or "-"
-    cat = p.get("category") or ""
-    desc = (p.get("description") or "").strip()
-    hi = (p.get("highlight") or "").strip()
-    lat = p.get("latitude")
-    lng = p.get("longitude")
-
-    lines = [f"• {name} ({cat}) – ตำบล{tambon}"]
-    if desc:
-        lines.append(desc)
-    if hi:
-        lines.append(f"จุดเด่น: {hi}")
-    if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
-        map_link = f"https://www.google.com/maps?q={lat},{lng}"
-        lines.append(f"🗺️ พิกัด: {lat:.6f}, {lng:.6f}  |  [เปิดแผนที่]({map_link})")
-    return "\n".join(lines)
 
 def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Optional[str]:
     """
@@ -84,34 +68,40 @@ def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Opti
             return t
     return None  # ไม่เจอในข้อความผู้ใช้ → ตัดเดาทิ้ง
 
-def get_answer(user_input: str, user_lat: Optional[float] = None, user_lng: Optional[float] = None) -> Tuple[str, List[Dict]]:
+
+def get_answer(
+    user_input: str,
+    user_lat: Optional[float] = None,
+    user_lng: Optional[float] = None,
+) -> Tuple[str, List[Dict]]:
     """
-    ถ้ามีพิกัด → แนะนำเฉพาะ 'ใกล้ฉัน'
-    ถ้าไม่มีพิกัด → ค้นแบบเดิม
+    ถ้ามีพิกัด → แนะนำเฉพาะ 'ใกล้ฉัน' (ภายใน 15 กม.)
+    ถ้าไม่มีพิกัด → ค้นแบบเดิม (category/tambon/keywords)
+    ส่งกลับ: (ข้อความสั้นๆ intro/outro, รายการสถานที่ dict สำหรับการ์ด)
     """
     analysis = analyze_query(user_input)
     category = analysis.get("category")
     tambon_pred = analysis.get("tambon")
     keywords = analysis.get("keywords")
 
+    # ไม่เดาตำบลเอง ถ้าไม่ได้อยู่ในข้อความผู้ใช้
     tambon = _tambon_if_in_text(user_input, tambon_pred)
 
-    results: List[Dict] = []
-
-    # ✅ ถ้ามีพิกัด ให้ใช้ near-by เท่านั้น (แนะนำเฉพาะที่ใกล้ ๆ)
+    # ----- ค้นหาข้อมูล -----
     if user_lat is not None and user_lng is not None:
+        # ใกล้ฉันเท่านั้น
         results = search_places_nearby(
             user_lat, user_lng,
             category=category, tambon=tambon, keywords=keywords,
             limit=10, within_km=15
         )
-        intro = "เจอสถานที่ใกล้คุณครับ:\n\n"
+        intro = "เจอสถานที่ใกล้คุณครับ:"
     else:
-        # ไม่มีพิกัด → ค้นแบบทั่วไป
+        # ค้นแบบทั่วไป
         results = search_places(category=category, tambon=tambon, keywords=keywords, limit=10)
-        intro = "เจอที่น่าสนใจให้ครับ:\n\n"
+        intro = "เจอที่น่าสนใจให้ครับ:"
 
-    # เข้มงวดด้วย keywords อีกชั้น (ถ้ามี)
+    # ----- กรองเพิ่มด้วย keywords แบบเข้ม (ถ้ามี) -----
     if keywords and isinstance(keywords, str):
         kw = [k.strip().lower() for k in keywords.split() if k.strip()]
         if kw:
@@ -128,8 +118,9 @@ def get_answer(user_input: str, user_lat: Optional[float] = None, user_lng: Opti
 
     if not results:
         if user_lat is not None and user_lng is not None:
-            return ("ยังไม่พบสถานที่ใกล้คุณในรัศมี 15 กม. ครับ ลองขยายรัศมีหรือระบุประเภท/คีย์เวิร์ดเพิ่มได้ครับ", [])
+            return ("ยังไม่พบสถานที่ใกล้คุณในรัศมี 15 กม. ครับ ลองระบุประเภทหรือคีย์เวิร์ดเพิ่มได้นะครับ", [])
         return ("ยังไม่พบสถานที่ที่ตรงกับคำค้นครับ ลองเพิ่มคีย์เวิร์ดหรือตำบล", [])
 
-    body = "\n\n".join(_format_one_place(p) for p in results)
-    return (intro + body, results)
+    outro = "อยากให้ปักหมุดเส้นทาง หรือกรองเพิ่ม (เช่น เมนู/งบประมาณ) บอกผมได้เลยครับ"
+    # ไม่แนบรายละเอียดสถานที่ในข้อความ เพื่อไม่ซ้ำกับการ์ด
+    return (f"{intro}\n\n{outro}", results)

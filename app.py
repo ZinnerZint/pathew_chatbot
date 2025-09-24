@@ -4,7 +4,7 @@ from config import MAPS_API_KEY
 from urllib.parse import quote
 import json
 
-# พยายามใช้ไลบรารีดึงพิกัด ถ้าไม่มีจะไม่พัง (ให้เพิ่มใน requirements.txt: streamlit-javascript)
+# ดึงพิกัดด้วยไลบรารี (ถ้าไม่มี จะไม่พัง)
 try:
     from streamlit_javascript import st_javascript
 except Exception:
@@ -25,18 +25,18 @@ avatar_bot  = f"data:image/svg+xml;utf8,{quote(svg_bot)}"
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "สวัสดีครับ! อยากหาอะไรในอำเภอปะทิวบอกผมได้เลย"}]
 
-# ---------- ขอพิกัดผู้ใช้ (ถ้ามี lib และยังไม่มีใน session) ----------
+# ---------- ขอพิกัดผู้ใช้ (ครั้งแรกเท่านั้น ถ้ามีไลบรารี) ----------
 user_lat = st.session_state.get("user_lat")
 user_lng = st.session_state.get("user_lng")
 if st_javascript and (user_lat is None or user_lng is None):
     try:
         coords = st_javascript("navigator.geolocation.getCurrentPosition((p) => p.coords);")
         if coords and isinstance(coords, dict):
-            user_lat = coords.get("latitude")
-            user_lng = coords.get("longitude")
-            if user_lat and user_lng:
-                st.session_state["user_lat"] = float(user_lat)
-                st.session_state["user_lng"] = float(user_lng)
+            lat = coords.get("latitude")
+            lng = coords.get("longitude")
+            if lat and lng:
+                st.session_state["user_lat"] = float(lat)
+                st.session_state["user_lng"] = float(lng)
     except Exception:
         pass
 
@@ -50,12 +50,12 @@ for msg in st.session_state.messages:
 user_input = st.chat_input("พิมพ์คำถามเกี่ยวกับสถานที่ในปะทิวได้เลย…")
 
 if user_input:
-    # -------- User message --------
+    # User message
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user", avatar=avatar_user):
         st.markdown(user_input)
 
-    # -------- Bot response (ส่งพิกัดเข้าไปจริง) --------
+    # Bot answer (ส่งพิกัดเข้าไปด้วย ถ้ามี)
     reply_text, places = get_answer(
         user_input,
         user_lat=st.session_state.get("user_lat"),
@@ -63,22 +63,23 @@ if user_input:
     )
 
     with st.chat_message("assistant", avatar=avatar_bot):
+        # ข้อความนำ/ปิด (ไม่มีรายละเอียดสถานที่ซ้ำ)
         st.markdown(reply_text)
 
-        # การ์ดผลลัพธ์ + แกลเลอรีรูป
+        # การ์ดผลลัพธ์ (รูป+ข้อมูล+จุดเด่น)
         if places:
             for p in places:
                 name = p.get("name", "-")
                 desc = (p.get("description") or "").strip()
+                hi = (p.get("highlight") or "").strip()
                 lat, lng = p.get("latitude"), p.get("longitude")
                 map_link = f"https://www.google.com/maps?q={lat},{lng}" if lat and lng else None
 
                 with st.container(border=True):
                     cols = st.columns([1, 2])
+                    # -------- คอลัมน์ซ้าย: รูป (แกลเลอรี) --------
                     with cols[0]:
                         shown = False
-
-                        # รูปหลายรูปจาก image_urls (เก็บเป็น TEXT -> JSON)
                         images_raw = p.get("image_urls") or "[]"
                         try:
                             images = json.loads(images_raw) if isinstance(images_raw, str) else images_raw
@@ -119,11 +120,15 @@ if user_input:
                         if not shown:
                             st.markdown("🖼️ ไม่มีรูป")
 
+                    # -------- คอลัมน์ขวา: รายละเอียด + จุดเด่น --------
                     with cols[1]:
-                        st.markdown(f"**{name}**  \n{desc or '—'}")
+                        st.markdown(f"**{name}**")
+                        st.markdown(desc or "—")
+                        if hi:
+                            st.markdown(f"**จุดเด่น:** {hi}")
                         st.markdown(f"**ตำบล:** {p.get('tambon','-')}  |  **ประเภท:** {p.get('category','-')}")
                         if map_link:
                             st.markdown(f"[🗺️ เปิดแผนที่]({map_link})")
 
-    # เก็บคำตอบบอทลง session
+    # เก็บข้อความบอทลง session
     st.session_state.messages.append({"role": "assistant", "content": reply_text})
