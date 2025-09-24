@@ -1,15 +1,16 @@
 import json
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 import google.generativeai as genai
 from config import GEMINI_API_KEY
-from db import search_places
+from db import search_places, search_places_nearby
 
 # ----- ตั้งค่า LLM -----
 genai.configure(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.0-flash-lite"
 model = genai.GenerativeModel(MODEL_NAME)
 
+KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}  # เพิ่ม/แก้ได้ตามจริง
 
 def _safe_json(text: str) -> dict:
     if not text:
@@ -23,11 +24,11 @@ def _safe_json(text: str) -> dict:
     except Exception:
         return {}
 
-
 def analyze_query(user_input: str) -> dict:
     prompt = f"""
-คุณคือระบบช่วยหาสถานที่ในอำเภอปะทิว จังหวัดชุมพร
+คุณคือระบบช่วยหาสถานที่ใน "อำเภอปะทิว" จังหวัดชุมพร เท่านั้น
 หน้าที่: วิเคราะห์คำถามผู้ใช้แล้วสรุปเป็น JSON เท่านั้น ห้ามมีคำอธิบายอื่น
+ห้ามเดาตำบลถ้าผู้ใช้ไม่ได้ระบุในข้อความ
 
 ผู้ใช้: "{user_input}"
 
@@ -51,7 +52,6 @@ def analyze_query(user_input: str) -> dict:
     except Exception:
         return {"category": None, "tambon": None, "price": None, "keywords": None}
 
-
 def _format_one_place(p: Dict) -> str:
     name = p.get("name") or "-"
     tambon = p.get("tambon") or "-"
@@ -71,16 +71,35 @@ def _format_one_place(p: Dict) -> str:
         lines.append(f"🗺️ พิกัด: {lat:.6f}, {lng:.6f}  |  [เปิดแผนที่]({map_link})")
     return "\n".join(lines)
 
+def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Optional[str]:
+    """
+    รับเฉพาะตำบลที่ 'ปรากฏจริง' ในข้อความผู้ใช้ และอยู่ในลิสต์ตำบลของปะทิว
+    """
+    if not predicted_tambon:
+        return None
+    ui = user_input.strip().lower()
+    for t in KNOWN_TAMBON:
+        if t in ui and predicted_tambon and t == predicted_tambon:
+            return t
+    return None  # ตัดเดาออก
 
-def get_answer(user_input: str) -> Tuple[str, List[Dict]]:
+def get_answer(user_input: str, user_lat: Optional[float] = None, user_lng: Optional[float] = None) -> Tuple[str, List[Dict]]:
     analysis = analyze_query(user_input)
     category = analysis.get("category")
-    tambon = analysis.get("tambon")
+    tambon_pred = analysis.get("tambon")
     keywords = analysis.get("keywords")
 
+    # อย่าเดาตำบลถ้าไม่ได้อยู่ในข้อความผู้ใช้
+    tambon = _tambon_if_in_text(user_input, tambon_pred)
+
+    # ค้นแบบปกติก่อน
     results = search_places(category=category, tambon=tambon, keywords=keywords, limit=10)
 
-    # ---- กรองผลลัพธ์ด้วย keywords แบบเข้มงวด ----
+    # ถ้ายังว่าง และมีพิกัด → ลองค้นใกล้ฉัน (ภายใน 20 กม. ก่อน)
+    if (not results) and (user_lat is not None and user_lng is not None):
+        results = search_places_nearby(user_lat, user_lng, category=category, tambon=tambon, keywords=keywords, limit=10, within_km=20)
+
+    # กรองเพิ่มด้วย keywords แบบเข้ม
     if keywords and isinstance(keywords, str):
         kw = [k.strip().lower() for k in keywords.split() if k.strip()]
         if kw:
@@ -96,15 +115,16 @@ def get_answer(user_input: str) -> Tuple[str, List[Dict]]:
                 results = filtered
 
     if not (category or tambon or keywords):
-        return ("ผมยังไม่เข้าใจชัด ลองพิมพ์เพิ่ม เช่น “ตลาดเลริวเซ็น ชุมโค” นะครับ 😊", [])
+        return ("เพื่อให้ตอบตรงขึ้น บอกประเภท/คีย์เวิร์ดเพิ่มได้ครับ เช่น “ตลาดเลริวเซ็น ชุมโค” หรือกดอนุญาตตำแหน่งเพื่อให้ผมหาใกล้คุณที่สุด", [])
 
     if not results:
-        msg = f"ยังไม่พบ{category or 'สถานที่'}"
+        msg = "ยังไม่พบสถานที่ที่ตรงกับคำค้นครับ"
         if tambon:
-            msg += f"ในตำบล{tambon}"
+            msg += f" ในตำบล{tambon}"
         if keywords:
-            msg += f" ที่เกี่ยวกับ {keywords}"
-        msg += " ตอนนี้เลยครับ ลองเปลี่ยนคำค้นนิดนึงก็ได้ครับ"
+            msg += f" ที่เกี่ยวกับ “{keywords}”"
+        if user_lat is not None and user_lng is not None:
+            msg += " (ผมจะลองใช้ตำแหน่งของคุณช่วยค้นได้ด้วยนะ)"
         return (msg, [])
 
     intro = "เจอที่น่าสนใจให้ครับ:\n\n"
