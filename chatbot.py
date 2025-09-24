@@ -10,7 +10,8 @@ genai.configure(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.0-flash-lite"
 model = genai.GenerativeModel(MODEL_NAME)
 
-KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}  # เพิ่ม/แก้ได้ตามจริง
+# รายชื่อตำบลในอำเภอปะทิว (ปรับ/เพิ่มได้)
+KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}
 
 def _safe_json(text: str) -> dict:
     if not text:
@@ -73,33 +74,44 @@ def _format_one_place(p: Dict) -> str:
 
 def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Optional[str]:
     """
-    รับเฉพาะตำบลที่ 'ปรากฏจริง' ในข้อความผู้ใช้ และอยู่ในลิสต์ตำบลของปะทิว
+    รับเฉพาะตำบลที่ 'ปรากฏจริง' ในข้อความผู้ใช้ และต้องเป็นตำบลในอำเภอปะทิว
     """
     if not predicted_tambon:
         return None
     ui = user_input.strip().lower()
     for t in KNOWN_TAMBON:
-        if t in ui and predicted_tambon and t == predicted_tambon:
+        if t in ui and predicted_tambon == t:
             return t
-    return None  # ตัดเดาออก
+    return None  # ไม่เจอในข้อความผู้ใช้ → ตัดเดาทิ้ง
 
 def get_answer(user_input: str, user_lat: Optional[float] = None, user_lng: Optional[float] = None) -> Tuple[str, List[Dict]]:
+    """
+    ถ้ามีพิกัด → แนะนำเฉพาะ 'ใกล้ฉัน'
+    ถ้าไม่มีพิกัด → ค้นแบบเดิม
+    """
     analysis = analyze_query(user_input)
     category = analysis.get("category")
     tambon_pred = analysis.get("tambon")
     keywords = analysis.get("keywords")
 
-    # อย่าเดาตำบลถ้าไม่ได้อยู่ในข้อความผู้ใช้
     tambon = _tambon_if_in_text(user_input, tambon_pred)
 
-    # ค้นแบบปกติก่อน
-    results = search_places(category=category, tambon=tambon, keywords=keywords, limit=10)
+    results: List[Dict] = []
 
-    # ถ้ายังว่าง และมีพิกัด → ลองค้นใกล้ฉัน (ภายใน 20 กม. ก่อน)
-    if (not results) and (user_lat is not None and user_lng is not None):
-        results = search_places_nearby(user_lat, user_lng, category=category, tambon=tambon, keywords=keywords, limit=10, within_km=20)
+    # ✅ ถ้ามีพิกัด ให้ใช้ near-by เท่านั้น (แนะนำเฉพาะที่ใกล้ ๆ)
+    if user_lat is not None and user_lng is not None:
+        results = search_places_nearby(
+            user_lat, user_lng,
+            category=category, tambon=tambon, keywords=keywords,
+            limit=10, within_km=15
+        )
+        intro = "เจอสถานที่ใกล้คุณครับ:\n\n"
+    else:
+        # ไม่มีพิกัด → ค้นแบบทั่วไป
+        results = search_places(category=category, tambon=tambon, keywords=keywords, limit=10)
+        intro = "เจอที่น่าสนใจให้ครับ:\n\n"
 
-    # กรองเพิ่มด้วย keywords แบบเข้ม
+    # เข้มงวดด้วย keywords อีกชั้น (ถ้ามี)
     if keywords and isinstance(keywords, str):
         kw = [k.strip().lower() for k in keywords.split() if k.strip()]
         if kw:
@@ -114,20 +126,10 @@ def get_answer(user_input: str, user_lat: Optional[float] = None, user_lng: Opti
             if filtered:
                 results = filtered
 
-    if not (category or tambon or keywords):
-        return ("เพื่อให้ตอบตรงขึ้น บอกประเภท/คีย์เวิร์ดเพิ่มได้ครับ เช่น “ตลาดเลริวเซ็น ชุมโค” หรือกดอนุญาตตำแหน่งเพื่อให้ผมหาใกล้คุณที่สุด", [])
-
     if not results:
-        msg = "ยังไม่พบสถานที่ที่ตรงกับคำค้นครับ"
-        if tambon:
-            msg += f" ในตำบล{tambon}"
-        if keywords:
-            msg += f" ที่เกี่ยวกับ “{keywords}”"
         if user_lat is not None and user_lng is not None:
-            msg += " (ผมจะลองใช้ตำแหน่งของคุณช่วยค้นได้ด้วยนะ)"
-        return (msg, [])
+            return ("ยังไม่พบสถานที่ใกล้คุณในรัศมี 15 กม. ครับ ลองขยายรัศมีหรือระบุประเภท/คีย์เวิร์ดเพิ่มได้ครับ", [])
+        return ("ยังไม่พบสถานที่ที่ตรงกับคำค้นครับ ลองเพิ่มคีย์เวิร์ดหรือตำบล", [])
 
-    intro = "เจอที่น่าสนใจให้ครับ:\n\n"
     body = "\n\n".join(_format_one_place(p) for p in results)
-    outro = "\n\nอยากให้ปักหมุดเส้นทาง หรือกรองเพิ่ม (เช่น เมนู/งบประมาณ) บอกผมได้เลยครับ"
-    return (intro + body + outro, results)
+    return (intro + body, results)

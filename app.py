@@ -4,7 +4,7 @@ from config import MAPS_API_KEY
 from urllib.parse import quote
 import json
 
-# พยายามใช้ไลบรารีดึงพิกัด ถ้าไม่มีจะไม่พัง
+# พยายามใช้ไลบรารีดึงพิกัด ถ้าไม่มีจะไม่พัง (ให้เพิ่มใน requirements.txt: streamlit-javascript)
 try:
     from streamlit_javascript import st_javascript
 except Exception:
@@ -25,7 +25,7 @@ avatar_bot  = f"data:image/svg+xml;utf8,{quote(svg_bot)}"
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "สวัสดีครับ! อยากหาอะไรในอำเภอปะทิวบอกผมได้เลย"}]
 
-# ---------- ขอพิกัดผู้ใช้ (ถ้ามี lib) ----------
+# ---------- ขอพิกัดผู้ใช้ (ถ้ามี lib และยังไม่มีใน session) ----------
 user_lat = st.session_state.get("user_lat")
 user_lng = st.session_state.get("user_lng")
 if st_javascript and (user_lat is None or user_lng is None):
@@ -50,16 +50,22 @@ for msg in st.session_state.messages:
 user_input = st.chat_input("พิมพ์คำถามเกี่ยวกับสถานที่ในปะทิวได้เลย…")
 
 if user_input:
+    # -------- User message --------
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user", avatar=avatar_user):
         st.markdown(user_input)
 
-    # ส่งพิกัดเข้า get_answer ใช้งานจริง
-    reply_text, places = get_answer(user_input, user_lat=st.session_state.get("user_lat"), user_lng=st.session_state.get("user_lng"))
+    # -------- Bot response (ส่งพิกัดเข้าไปจริง) --------
+    reply_text, places = get_answer(
+        user_input,
+        user_lat=st.session_state.get("user_lat"),
+        user_lng=st.session_state.get("user_lng")
+    )
 
     with st.chat_message("assistant", avatar=avatar_bot):
         st.markdown(reply_text)
 
+        # การ์ดผลลัพธ์ + แกลเลอรีรูป
         if places:
             for p in places:
                 name = p.get("name", "-")
@@ -71,6 +77,8 @@ if user_input:
                     cols = st.columns([1, 2])
                     with cols[0]:
                         shown = False
+
+                        # รูปหลายรูปจาก image_urls (เก็บเป็น TEXT -> JSON)
                         images_raw = p.get("image_urls") or "[]"
                         try:
                             images = json.loads(images_raw) if isinstance(images_raw, str) else images_raw
@@ -79,8 +87,10 @@ if user_input:
                         urls = [u for u in images if isinstance(u, str) and u.startswith("http")]
 
                         if urls:
+                            # รูปแรกใหญ่
                             st.image(urls[0], use_container_width=True)
                             shown = True
+                            # ที่เหลือเป็น thumbnail (แถวละ 4)
                             thumbs = urls[1:]
                             if thumbs:
                                 for i in range(0, len(thumbs), 4):
@@ -90,11 +100,13 @@ if user_input:
                                         with tcol:
                                             st.image(u, use_container_width=True)
 
+                        # ถ้าไม่มี image_urls แต่ยังมี image_url เดิม
                         img = p.get("image_url")
                         if (not shown) and isinstance(img, str) and img.startswith("http"):
                             st.image(img, use_container_width=True)
                             shown = True
 
+                        # ถ้าไม่มีรูป → ใช้ Static Maps
                         if (not shown) and lat and lng and MAPS_API_KEY:
                             static_map = (
                                 "https://maps.googleapis.com/maps/api/staticmap"
@@ -113,5 +125,5 @@ if user_input:
                         if map_link:
                             st.markdown(f"[🗺️ เปิดแผนที่]({map_link})")
 
-    # เก็บคำตอบบอท
+    # เก็บคำตอบบอทลง session
     st.session_state.messages.append({"role": "assistant", "content": reply_text})
