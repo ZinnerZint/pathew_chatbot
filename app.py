@@ -61,7 +61,7 @@ if user_input:
                     with cols[0]:
                         shown = False
 
-                        # ----- แสดงหลายรูปจาก image_urls -----
+                        # ----- แสดงหลายรูปแบบ gallery -----
                         images_raw = p.get("image_urls") or []
                         if isinstance(images_raw, str):
                             try:
@@ -74,9 +74,19 @@ if user_input:
                         urls = [u for u in images if isinstance(u, str) and u.startswith("http")]
 
                         if urls:
-                            for u in urls:
-                                st.image(u, use_container_width=True)
+                            # รูปแรกใหญ่
+                            st.image(urls[0], use_container_width=True)
                             shown = True
+
+                            # thumbnail 4 รูปต่อแถว
+                            thumbs = urls[1:]
+                            if thumbs:
+                                for i in range(0, len(thumbs), 4):
+                                    row = thumbs[i:i+4]
+                                    tcols = st.columns(len(row))
+                                    for tcol, u in zip(tcols, row):
+                                        with tcol:
+                                            st.image(u, use_container_width=True)
 
                         # ถ้าไม่มี image_urls แต่ยังมี image_url เดิม
                         img = p.get("image_url")
