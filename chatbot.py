@@ -95,21 +95,29 @@ def get_answer(
 ) -> Tuple[str, List[Dict]]:
     """
     ใช้ LLM ช่วยเรียบเรียง แต่ข้อมูลสถานที่ต้องมาจาก DB เท่านั้น
-    รองรับการถามต่อ: "กี่โล", "ใกล้มั้ย" โดยอิงจาก last_places
+    รองรับการถามต่อ: "กี่โล", "ใกล้มั้ย", "ใกล้สุด"
     """
-    # ----- ตรวจสอบว่าผู้ใช้ถามเรื่องระยะทางต่อ -----
+
+    # ----- ตรวจสอบว่าผู้ใช้ถามต่อเกี่ยวกับระยะทางหรือใกล้สุด -----
     ask_distance = any(kw in user_input for kw in ["กี่โล", "กี่กิโล", "ใกล้", "ไกล", "ระยะทาง"])
-    if ask_distance and history:
-        # หาผลลัพธ์ล่าสุดจาก history
+    ask_nearest = any(kw in user_input for kw in ["ใกล้สุด", "ใกล้ที่สุด", "อันแรก"])
+
+    if (ask_distance or ask_nearest) and history:
         for h in reversed(history):
             if h.get("role") == "assistant" and h.get("last_places"):
                 last_places = h["last_places"]
                 if last_places:
-                    first = last_places[0]
-                    dist = first.get("distance_km")
-                    if dist is not None:
+                    target = last_places[0]  # ตัวแรก = ใกล้สุด เพราะ sort แล้ว
+                    dist = target.get("distance_km")
+                    if ask_nearest:
+                        msg = f"สถานที่ที่ใกล้คุณที่สุดคือ **{target['name']}**"
+                        if dist is not None:
+                            msg += f" ห่างจากคุณประมาณ {round(float(dist),1)} กม."
+                        msg += " หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
+                        return (msg, last_places)
+                    if ask_distance and dist is not None:
                         km = round(float(dist), 1)
-                        msg = f"{first['name']} อยู่ห่างจากคุณประมาณ {km} กม. หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
+                        msg = f"{target['name']} อยู่ห่างจากคุณประมาณ {km} กม. หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
                         return (msg, last_places)
 
     # ----- วิเคราะห์ query -----
