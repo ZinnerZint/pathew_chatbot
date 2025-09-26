@@ -66,6 +66,7 @@ if user_input:
     with st.chat_message("assistant", avatar=avatar_bot):
         st.markdown(reply_text)
 
+        # แสดงการ์ดเฉพาะเมื่อมีผลลัพธ์สถานที่จริง ๆ
         if places:
             st.session_state.last_places = places
             for p in places:
@@ -77,6 +78,7 @@ if user_input:
 
                 with st.container(border=True):
                     cols = st.columns([1, 2])
+                    # -------- คอลัมน์ซ้าย: รูป/แผนที่ --------
                     with cols[0]:
                         shown = False
                         images_raw = p.get("image_urls") or "[]"
@@ -115,6 +117,7 @@ if user_input:
                         if not shown:
                             st.markdown("🖼️ ไม่มีรูป")
 
+                    # -------- คอลัมน์ขวา: รายละเอียด --------
                     with cols[1]:
                         st.markdown(f"**{name}**")
                         st.markdown(desc or "—")
@@ -124,7 +127,7 @@ if user_input:
                         if map_link:
                             st.markdown(f"[🗺️ เปิดแผนที่]({map_link})")
 
-    # เก็บข้อความบอท + สถานที่ล่าสุด ไว้ใน history
+    # เก็บข้อความบอท + สถานที่ล่าสุด ไว้ใน history เพื่อใช้ตอบ “กี่โล/ใกล้สุด” รอบถัดไป
     st.session_state.messages.append({
         "role": "assistant",
         "content": reply_text,

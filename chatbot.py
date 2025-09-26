@@ -13,6 +13,13 @@ model = genai.GenerativeModel(MODEL_NAME)
 # รายชื่อตำบลในอำเภอปะทิว
 KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}
 
+# คีย์เวิร์ดที่สื่อว่าเป็น “คำถามเกี่ยวกับสถานที่”
+PLACE_HINTS = [
+    "ร้าน", "คาเฟ่", "ตลาด", "ปั๊ม", "ปั๊มน้ำมัน", "วัด", "ทะเล", "หาด",
+    "ที่เที่ยว", "จุดชมวิว", "ที่กิน", "ที่พัก", "โฮมสเตย์", "รีสอร์ท",
+    "ใกล้ฉัน", "อยู่แถว", "ใกล้", "ห่าง", "กี่โล"
+]
+
 
 def _safe_json(text: str) -> dict:
     if not text:
@@ -87,6 +94,18 @@ def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Opti
     return None
 
 
+def _is_place_intent(user_input: str, analysis: dict) -> bool:
+    """
+    บอกว่า "ข้อความนี้ตั้งใจถามหาสถานที่ไหม"
+    - ถ้า LLM ดึง category/keywords มาได้ → ใช่
+    - หรือถ้ามีคำใบ้จาก PLACE_HINTS → ใช่
+    """
+    ui = (user_input or "").strip().lower()
+    if analysis.get("category") or analysis.get("keywords"):
+        return True
+    return any(h in ui for h in PLACE_HINTS)
+
+
 def get_answer(
     user_input: str,
     user_lat: Optional[float] = None,
@@ -96,18 +115,19 @@ def get_answer(
     """
     ใช้ LLM ช่วยเรียบเรียง แต่ข้อมูลสถานที่ต้องมาจาก DB เท่านั้น
     รองรับการถามต่อ: "กี่โล", "ใกล้มั้ย", "ใกล้สุด"
+    และจะไม่แนะนำสถานที่ถ้าผู้ใช้ยังไม่ได้ถามถึงสถานที่
     """
 
     # ----- ตรวจสอบว่าผู้ใช้ถามต่อเกี่ยวกับระยะทางหรือใกล้สุด -----
     ask_distance = any(kw in user_input for kw in ["กี่โล", "กี่กิโล", "ใกล้", "ไกล", "ระยะทาง"])
-    ask_nearest = any(kw in user_input for kw in ["ใกล้สุด", "ใกล้ที่สุด", "อันแรก"])
+    ask_nearest  = any(kw in user_input for kw in ["ใกล้สุด", "ใกล้ที่สุด", "อันแรก"])
 
     if (ask_distance or ask_nearest) and history:
         for h in reversed(history):
             if h.get("role") == "assistant" and h.get("last_places"):
                 last_places = h["last_places"]
                 if last_places:
-                    target = last_places[0]  # ตัวแรก = ใกล้สุด เพราะ sort แล้ว
+                    target = last_places[0]  # ตัวแรก = ใกล้สุด เพราะ search_places_nearby sort ระยะทางแล้ว
                     dist = target.get("distance_km")
                     if ask_nearest:
                         msg = f"สถานที่ที่ใกล้คุณที่สุดคือ **{target['name']}**"
@@ -122,10 +142,20 @@ def get_answer(
 
     # ----- วิเคราะห์ query -----
     analysis = analyze_query(user_input, history=history)
+    # ถ้ายังไม่ใช่เจตนาถามหาสถานที่ → อย่าแนะนำอะไร
+    if not _is_place_intent(user_input, analysis):
+        help_msg = (
+            "ผมช่วยหา “สถานที่ในอำเภอปะทิว” ให้ได้ครับ เช่น:\n"
+            "- ร้านอาหาร/คาเฟ่ (ระบุเมนูได้ เช่น ข้าวผัดปู)\n"
+            "- ปั๊มน้ำมัน/ที่จอดรถ/จุดชมวิว\n"
+            "- ค้นหา “ใกล้ฉัน” โดยใช้พิกัดปัจจุบัน\n\n"
+            "ลองพิมพ์เช่น: “ตลาดเลริวเซ็นอยู่ตรงไหน”, “คาเฟ่ใกล้ฉัน”, หรือ “ร้านอาหารแถวชุมโค”"
+        )
+        return (help_msg, [])
+
     category = analysis.get("category")
     tambon_pred = analysis.get("tambon")
     keywords = analysis.get("keywords")
-
     tambon = _tambon_if_in_text(user_input, tambon_pred)
 
     # ----- ค้นหาข้อมูลจาก DB -----
