@@ -95,7 +95,24 @@ def get_answer(
 ) -> Tuple[str, List[Dict]]:
     """
     ใช้ LLM ช่วยเรียบเรียง แต่ข้อมูลสถานที่ต้องมาจาก DB เท่านั้น
+    รองรับการถามต่อ: "กี่โล", "ใกล้มั้ย" โดยอิงจาก last_places
     """
+    # ----- ตรวจสอบว่าผู้ใช้ถามเรื่องระยะทางต่อ -----
+    ask_distance = any(kw in user_input for kw in ["กี่โล", "กี่กิโล", "ใกล้", "ไกล", "ระยะทาง"])
+    if ask_distance and history:
+        # หาผลลัพธ์ล่าสุดจาก history
+        for h in reversed(history):
+            if h.get("role") == "assistant" and h.get("last_places"):
+                last_places = h["last_places"]
+                if last_places:
+                    first = last_places[0]
+                    dist = first.get("distance_km")
+                    if dist is not None:
+                        km = round(float(dist), 1)
+                        msg = f"{first['name']} อยู่ห่างจากคุณประมาณ {km} กม. หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
+                        return (msg, last_places)
+
+    # ----- วิเคราะห์ query -----
     analysis = analyze_query(user_input, history=history)
     category = analysis.get("category")
     tambon_pred = analysis.get("tambon")

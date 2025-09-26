@@ -124,4 +124,9 @@ if user_input:
                         if map_link:
                             st.markdown(f"[🗺️ เปิดแผนที่]({map_link})")
 
-    st.session_state.messages.append({"role": "assistant", "content": reply_text})
+    # เก็บข้อความบอท + สถานที่ล่าสุด ไว้ใน history
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": reply_text,
+        "last_places": places
+    })
