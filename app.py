@@ -13,7 +13,7 @@ except Exception:
 # ---------- Page setup ----------
 st.set_page_config(page_title="Pathew Chatbot", page_icon="🌴", layout="centered")
 st.markdown("<h1 style='margin-bottom:0'>🌴 AI Chatbot แนะนำสถานที่ในอำเภอปะทิว</h1>", unsafe_allow_html=True)
-st.caption("ถามได้เลย เช่น: *ตลาดเลริวเซ็น*, *ปั๊มน้ำมันใกล้ฉัน*, *คาเฟ่ชุมโค*")
+st.caption("บอกความต้องการของคุณมาได้เลยได้เลย เช่น: *ตลาด*, *ปั๊มน้ำมัน*, *คาเฟ่*")
 
 # ---------- Colored avatars ----------
 svg_user = """<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='20' cy='20' r='18' fill='#3B82F6'/></svg>"""
@@ -24,6 +24,10 @@ avatar_bot  = f"data:image/svg+xml;utf8,{quote(svg_bot)}"
 # ---------- Session state ----------
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "สวัสดีครับ! อยากหาอะไรในอำเภอปะทิวบอกผมได้เลย"}]
+
+# เก็บผลลัพธ์ล่าสุดไว้ให้ผู้ใช้พิมพ์ต่อ (“อันแรก”, “กี่โล”, ฯลฯ) ได้
+if "last_places" not in st.session_state:
+    st.session_state.last_places = []
 
 # ---------- ขอพิกัดผู้ใช้ (ครั้งแรกเท่านั้น ถ้ามีไลบรารี) ----------
 user_lat = st.session_state.get("user_lat")
@@ -55,19 +59,21 @@ if user_input:
     with st.chat_message("user", avatar=avatar_user):
         st.markdown(user_input)
 
-    # Bot answer (ส่งพิกัดเข้าไปด้วย ถ้ามี)
+    # Bot answer — ส่งประวัติ 8 ข้อความล่าสุดให้โมเดลเพื่อจำบริบท
     reply_text, places = get_answer(
         user_input,
         user_lat=st.session_state.get("user_lat"),
-        user_lng=st.session_state.get("user_lng")
+        user_lng=st.session_state.get("user_lng"),
+        history=st.session_state.messages[-8:]
     )
 
     with st.chat_message("assistant", avatar=avatar_bot):
-        # ข้อความนำ/ปิด (ไม่มีรายละเอียดสถานที่ซ้ำ)
+        # แสดงข้อความนำ (intro) อย่างเดียว ไม่ใส่ outro
         st.markdown(reply_text)
 
         # การ์ดผลลัพธ์ (รูป+ข้อมูล+จุดเด่น)
         if places:
+            st.session_state.last_places = places  # เก็บไว้สำหรับคำถามต่อเนื่อง
             for p in places:
                 name = p.get("name", "-")
                 desc = (p.get("description") or "").strip()
@@ -130,5 +136,4 @@ if user_input:
                         if map_link:
                             st.markdown(f"[🗺️ เปิดแผนที่]({map_link})")
 
-    # เก็บข้อความบอทลง session
-    st.session_state.messages.append({"role": "assistant", "content": reply_text})
+    # เก็บข้อความบอทลง se
