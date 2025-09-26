@@ -121,7 +121,7 @@ def get_answer(
     for r in results:
         info = f"- {r['name']} (ประเภท: {r.get('category','')}, ตำบล {r.get('tambon','-')})"
         if r.get("distance_km"):
-            info += f" ห่างจากคุณ ~{round(float(r['distance_km']),1)} กม."
+            info += f" ห่างจากคุณประมาณ {round(float(r['distance_km']),1)} กม."
         if r.get("highlight"):
             info += f" จุดเด่น: {r['highlight']}"
         places_info.append(info)
@@ -132,7 +132,7 @@ def get_answer(
     prompt = f"""
 คุณคือผู้ช่วย AI แนะนำสถานที่ใน "อำเภอปะทิว" จังหวัดชุมพร
 ***ข้อมูลข้อเท็จจริงที่คุณต้องใช้ มาจากรายการด้านล่างนี้เท่านั้น***
-ห้ามสร้างชื่อสถานที่ เมนู หรือตำบลขึ้นมาเอง
+ห้ามสร้างข้อมูลใหม่ และต้องรายงาน "ระยะทาง (กม.)" ด้วยถ้ามี
 
 คำถามของผู้ใช้: "{user_input}"
 
