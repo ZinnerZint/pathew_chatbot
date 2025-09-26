@@ -10,7 +10,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.0-flash-lite"
 model = genai.GenerativeModel(MODEL_NAME)
 
-# รายชื่อตำบลในอำเภอปะทิว (ปรับ/เพิ่มได้)
+# รายชื่อตำบลในอำเภอปะทิว
 KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}
 
 
@@ -28,10 +28,7 @@ def _safe_json(text: str) -> dict:
 
 
 def _format_history(history: Optional[list]) -> str:
-    """
-    แปลงประวัติแชทเป็นข้อความเรียบง่ายให้โมเดลอ่าน
-    เอาเฉพาะ user / assistant ล่าสุดไม่เกิน 8 รายการ
-    """
+    """แปลงประวัติแชทเป็นข้อความเรียบง่ายให้โมเดลอ่าน"""
     if not history:
         return ""
     lines = []
@@ -51,8 +48,7 @@ def analyze_query(user_input: str, history: Optional[list] = None) -> dict:
     prompt = f"""
 คุณคือระบบช่วยหาสถานที่ใน "อำเภอปะทิว" จังหวัดชุมพร เท่านั้น
 หน้าที่: วิเคราะห์คำถามผู้ใช้แล้วสรุปเป็น JSON เท่านั้น ห้ามมีคำอธิบายอื่น
-ให้ใช้ "บทสนทนาก่อนหน้า" เพื่อทำความเข้าใจสรรพนาม/บริบท (เช่น "แถวนี้", "อันแรก", "เมื่อกี้", "กี่โล")
-ห้ามเดาตำบลถ้าผู้ใช้ไม่ได้ระบุไว้ในข้อความหรือบริบทก่อนหน้าอย่างชัดเจน
+ห้ามแนะนำสถานที่นอกอำเภอปะทิว
 
 บทสนทนาก่อนหน้า:
 {hist if hist else "—"}
@@ -81,16 +77,14 @@ def analyze_query(user_input: str, history: Optional[list] = None) -> dict:
 
 
 def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Optional[str]:
-    """
-    รับเฉพาะตำบลที่ 'ปรากฏจริง' ในข้อความผู้ใช้ และต้องเป็นตำบลในอำเภอปะทิว
-    """
+    """รับเฉพาะตำบลที่ปรากฏจริงในข้อความ และต้องเป็นตำบลในอำเภอปะทิว"""
     if not predicted_tambon:
         return None
     ui = user_input.strip().lower()
     for t in KNOWN_TAMBON:
         if t in ui and predicted_tambon == t:
             return t
-    return None  # ไม่เจอในข้อความผู้ใช้ → ตัดเดาทิ้ง
+    return None
 
 
 def get_answer(
@@ -100,52 +94,59 @@ def get_answer(
     history: Optional[list] = None,
 ) -> Tuple[str, List[Dict]]:
     """
-    ถ้ามีพิกัด → แนะนำเฉพาะ 'ใกล้ฉัน' (ภายใน 15 กม.)
-    ถ้าไม่มีพิกัด → ค้นแบบเดิม (category/tambon/keywords)
-    ส่งกลับ: (ข้อความสั้นๆ intro+outro, รายการสถานที่ dict สำหรับการ์ด)
+    ใช้ LLM ช่วยเรียบเรียง แต่ข้อมูลสถานที่ต้องมาจาก DB เท่านั้น
     """
     analysis = analyze_query(user_input, history=history)
     category = analysis.get("category")
     tambon_pred = analysis.get("tambon")
     keywords = analysis.get("keywords")
 
-    # ไม่เดาตำบลเอง ถ้าไม่ได้อยู่ในข้อความผู้ใช้
     tambon = _tambon_if_in_text(user_input, tambon_pred)
 
-    # ----- ค้นหาข้อมูล -----
+    # ----- ค้นหาข้อมูลจาก DB -----
     if user_lat is not None and user_lng is not None:
-        # ใกล้ฉันเท่านั้น
         results = search_places_nearby(
             user_lat, user_lng,
             category=category, tambon=tambon, keywords=keywords,
-            limit=10, within_km=15
+            limit=5, within_km=15
         )
-        intro = "เจอสถานที่ใกล้คุณครับ:"
     else:
-        # ค้นแบบทั่วไป
-        results = search_places(category=category, tambon=tambon, keywords=keywords, limit=10)
-        intro = "เจอที่น่าสนใจให้ครับ:"
-
-    # ----- กรองเพิ่มด้วย keywords แบบเข้ม (ถ้ามี) -----
-    if keywords and isinstance(keywords, str):
-        kw = [k.strip().lower() for k in keywords.split() if k.strip()]
-        if kw:
-            def ok(row):
-                text = " ".join([
-                    str(row.get("name") or ""),
-                    str(row.get("description") or ""),
-                    str(row.get("highlight") or ""),
-                ]).lower()
-                return all(k in text for k in kw)
-            filtered = list(filter(ok, results))
-            if filtered:
-                results = filtered
+        results = search_places(category=category, tambon=tambon, keywords=keywords, limit=5)
 
     if not results:
-        if user_lat is not None and user_lng is not None:
-            return ("ยังไม่พบสถานที่ใกล้คุณในรัศมี 15 กม. ครับ ลองระบุประเภทหรือคีย์เวิร์ดเพิ่มได้นะครับ", [])
-        return ("ยังไม่พบสถานที่ที่ตรงกับคำค้นครับ ลองเพิ่มคีย์เวิร์ดหรือตำบล", [])
+        return ("ยังไม่พบสถานที่ที่ตรงกับคำค้นในอำเภอปะทิวครับ", [])
 
-    # ----- เพิ่ม outro -----
-    outro = "หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
-    return (f"{intro}\n\n{outro}", results)
+    # ----- เตรียมข้อมูลจริงจาก DB -----
+    places_info = []
+    for r in results:
+        info = f"- {r['name']} (ประเภท: {r.get('category','')}, ตำบล {r.get('tambon','-')})"
+        if r.get("distance_km"):
+            info += f" ห่างจากคุณ ~{round(float(r['distance_km']),1)} กม."
+        if r.get("highlight"):
+            info += f" จุดเด่น: {r['highlight']}"
+        places_info.append(info)
+
+    context = "\n".join(places_info)
+
+    # ----- ใช้ LLM เรียบเรียงคำตอบ -----
+    prompt = f"""
+คุณคือผู้ช่วย AI แนะนำสถานที่ใน "อำเภอปะทิว" จังหวัดชุมพร
+***ข้อมูลข้อเท็จจริงที่คุณต้องใช้ มาจากรายการด้านล่างนี้เท่านั้น***
+ห้ามสร้างชื่อสถานที่ เมนู หรือตำบลขึ้นมาเอง
+
+คำถามของผู้ใช้: "{user_input}"
+
+สถานที่ที่ค้นเจอ:
+{context}
+
+โปรดตอบกลับผู้ใช้อย่างสุภาพ สมูท และเป็นธรรมชาติ
+ใช้เฉพาะข้อมูลจากรายการข้างต้น ห้ามแต่งเพิ่ม
+ลงท้ายด้วย: "หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
+"""
+    try:
+        res = model.generate_content(prompt)
+        reply = res.text.strip()
+    except Exception:
+        reply = "เจอสถานที่น่าสนใจให้ครับ หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
+
+    return (reply, results)
