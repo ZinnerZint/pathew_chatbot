@@ -1,3 +1,98 @@
+import json
+from typing import List, Dict, Tuple, Optional
+
+import google.generativeai as genai
+from config import GEMINI_API_KEY
+from db import search_places, search_places_nearby
+
+# ----- ตั้งค่า LLM -----
+genai.configure(api_key=GEMINI_API_KEY)
+MODEL_NAME = "gemini-2.0-flash-lite"
+model = genai.GenerativeModel(MODEL_NAME)
+
+# รายชื่อตำบลในอำเภอปะทิว (ปรับ/เพิ่มได้)
+KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}
+
+
+def _safe_json(text: str) -> dict:
+    if not text:
+        return {}
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        t = "\n".join(t.split("\n")[1:])
+    try:
+        return json.loads(t)
+    except Exception:
+        return {}
+
+
+def _format_history(history: Optional[list]) -> str:
+    """
+    แปลงประวัติแชทเป็นข้อความเรียบง่ายให้โมเดลอ่าน
+    เอาเฉพาะ user / assistant ล่าสุดไม่เกิน 8 รายการ
+    """
+    if not history:
+        return ""
+    lines = []
+    for m in history[-8:]:
+        role = m.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        speaker = "ผู้ใช้" if role == "user" else "บอท"
+        text = (m.get("content") or "").strip()
+        if text:
+            lines.append(f"{speaker}: {text}")
+    return "\n".join(lines)
+
+
+def analyze_query(user_input: str, history: Optional[list] = None) -> dict:
+    hist = _format_history(history)
+    prompt = f"""
+คุณคือระบบช่วยหาสถานที่ใน "อำเภอปะทิว" จังหวัดชุมพร เท่านั้น
+หน้าที่: วิเคราะห์คำถามผู้ใช้แล้วสรุปเป็น JSON เท่านั้น ห้ามมีคำอธิบายอื่น
+ให้ใช้ "บทสนทนาก่อนหน้า" เพื่อทำความเข้าใจสรรพนาม/บริบท (เช่น "แถวนี้", "อันแรก", "เมื่อกี้", "กี่โล")
+ห้ามเดาตำบลถ้าผู้ใช้ไม่ได้ระบุไว้ในข้อความหรือบริบทก่อนหน้าอย่างชัดเจน
+
+บทสนทนาก่อนหน้า:
+{hist if hist else "—"}
+
+คำถามล่าสุดของผู้ใช้: "{user_input}"
+
+จงตอบเป็น JSON โครงสร้างนี้เท่านั้น:
+{{
+  "category": "ประเภทสถานที่ เช่น ร้านอาหาร/คาเฟ่/ปั๊มน้ำมัน (ไม่รู้ให้ใส่ null)",
+  "tambon": "ชื่อตำบลในอำเภอปะทิว (ไม่รู้ให้ใส่ null)",
+  "price": "ถูก/ปานกลาง/แพง (ถ้ามี ไม่รู้ให้ใส่ null)",
+  "keywords": "คำค้นเพิ่ม เช่น ชื่อสถานที่ เมนู หรือบรรยากาศ (ไม่มีให้ใส่ null)"
+}}
+"""
+    try:
+        res = model.generate_content(prompt)
+        data = _safe_json(res.text)
+        return {
+            "category": data.get("category"),
+            "tambon": data.get("tambon"),
+            "price": data.get("price"),
+            "keywords": data.get("keywords"),
+        }
+    except Exception:
+        return {"category": None, "tambon": None, "price": None, "keywords": None}
+
+
+def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Optional[str]:
+    """
+    รับเฉพาะตำบลที่ 'ปรากฏจริง' ในข้อความผู้ใช้ และต้องเป็นตำบลในอำเภอปะทิว
+    """
+    if not predicted_tambon:
+        return None
+    ui = user_input.strip().lower()
+    for t in KNOWN_TAMBON:
+        if t in ui and predicted_tambon == t:
+            return t
+    return None  # ไม่เจอในข้อความผู้ใช้ → ตัดเดาทิ้ง
+
+
 def get_answer(
     user_input: str,
     user_lat: Optional[float] = None,
@@ -51,6 +146,6 @@ def get_answer(
             return ("ยังไม่พบสถานที่ใกล้คุณในรัศมี 15 กม. ครับ ลองระบุประเภทหรือคีย์เวิร์ดเพิ่มได้นะครับ", [])
         return ("ยังไม่พบสถานที่ที่ตรงกับคำค้นครับ ลองเพิ่มคีย์เวิร์ดหรือตำบล", [])
 
-    # เพิ่ม outro สั้นๆ
+    # ----- เพิ่ม outro -----
     outro = "หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
     return (f"{intro}\n\n{outro}", results)
