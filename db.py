@@ -1,4 +1,3 @@
-# db.py — ฟังก์ชันค้นหาสถานที่ในฐานข้อมูล PostgreSQL แบบยืดหยุ่น
 import psycopg2
 import psycopg2.extras
 import streamlit as st

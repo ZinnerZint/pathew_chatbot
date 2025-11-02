@@ -16,7 +16,7 @@ st.set_page_config(page_title="Pathew Chatbot", page_icon="🌴", layout="center
 st.markdown("<h1 style='margin-bottom:0'>🌴 AI Chatbot แนะนำสถานที่ในอำเภอปะทิว</h1>", unsafe_allow_html=True)
 st.caption("บอกความต้องการคุณมาได้เลย เช่น: ตลาด, ยิม/ฟิตเนส, คาเฟ่, ปั๊มน้ำมัน, วัด, จุดชมวิว")
 
-# ---------- Colored avatars (เรียบง่าย) ----------
+# ---------- Colored avatars ----------
 svg_user = """<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='20' cy='20' r='18' fill='#3B82F6'/></svg>"""
 svg_bot  = """<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='20' cy='20' r='18' fill='#F59E0B'/></svg>"""
 avatar_user = f"data:image/svg+xml;utf8,{quote(svg_user)}"
@@ -51,7 +51,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # ---------- Chat input ----------
-user_input = st.chat_input("พิมพ์คุยอะไรก็ได้ หรือบอกประเภท/ชื่อตั้งใจในปะทิว…")
+user_input = st.chat_input("พิมพ์คุยอะไรก็ได้ หรือบอกประเภท/ชื่อสถานที่ในปะทิว…")
 
 if user_input:
     # แสดง/เก็บข้อความผู้ใช้
@@ -59,13 +59,20 @@ if user_input:
     with st.chat_message("user", avatar=avatar_user):
         st.markdown(user_input)
 
-    # เรียกบอท — ส่ง history เข้าไปด้วยเพื่อความต่อเนื่อง
-    reply_text, places = get_answer(
-        user_input,
-        user_lat=st.session_state.get("user_lat"),
-        user_lng=st.session_state.get("user_lng"),
-        history=st.session_state.messages[-8:],   # << สำคัญ: ให้จำบริบท 8 ข้อความล่าสุด
-    )
+    # เรียกบอท — ส่ง history ถ้าฟังก์ชันรองรับ (กันพังหากไป import เวอร์ชันเก่า)
+    try:
+        reply_text, places = get_answer(
+            user_input,
+            user_lat=st.session_state.get("user_lat"),
+            user_lng=st.session_state.get("user_lng"),
+            history=st.session_state.messages[-8:],   # จำบริบท 8 ข้อความล่าสุด
+        )
+    except TypeError:
+        reply_text, places = get_answer(
+            user_input,
+            user_lat=st.session_state.get("user_lat"),
+            user_lng=st.session_state.get("user_lng"),
+        )
 
     # แสดงคำตอบ + การ์ดสถานที่
     with st.chat_message("assistant", avatar=avatar_bot):
@@ -84,7 +91,7 @@ if user_input:
                 with st.container(border=True):
                     cols = st.columns([1, 2])
 
-                    # ---- ซ้าย: รูป (รองรับแกลเลอรี) ----
+                    # ---- ซ้าย: รูป (รองรับแกลเลอรีหลายรูป) ----
                     with cols[0]:
                         shown = False
                         images_raw = p.get("image_urls") or "[]"
@@ -134,5 +141,5 @@ if user_input:
                         if map_link:
                             st.markdown(f"[เปิดแผนที่]({map_link})")
 
-    # เก็บข้อความบอทลงประวัติ (เก็บเฉพาะข้อความ ไม่ต้องเก็บรายการสถานที่)
+    # เก็บข้อความบอทลงประวัติ (เก็บเฉพาะข้อความ)
     st.session_state.messages.append({"role": "assistant", "content": reply_text})
