@@ -1,6 +1,8 @@
+# db.py — ฟังก์ชันค้นหาสถานที่ในฐานข้อมูล PostgreSQL แบบยืดหยุ่น
 import psycopg2
 import psycopg2.extras
 import streamlit as st
+from typing import List, Dict, Optional
 
 def get_conn():
     cfg = st.secrets["postgres"]
@@ -13,44 +15,48 @@ def get_conn():
         sslmode=cfg.get("sslmode", "require"),
     )
 
-def search_places(category=None, tambon=None, keywords=None, limit=10):
-    """
-    ค้นแบบทั่วไป (ไม่ใช้พิกัด)
-    """
-    sql = """
+def _build_keywords_or(prefix: str, keywords_any: Optional[List[str]]):
+    """สร้างเงื่อนไข OR สำหรับคีย์เวิร์ดหลายคำ"""
+    if not keywords_any:
+        return "TRUE", {}
+    clauses, params = [], {}
+    for i, term in enumerate(keywords_any):
+        key = f"{prefix}{i}"
+        params[key] = f"%{term}%"
+        clauses.append(
+            f"(name ILIKE %({key})s OR description ILIKE %({key})s OR highlight ILIKE %({key})s)"
+        )
+    return "(" + " OR ".join(clauses) + ")", params
+
+def search_places(category=None, tambon=None, keywords_any=None, limit=10) -> List[Dict]:
+    where_kw, p_kw = _build_keywords_or("kw", keywords_any)
+    sql = f"""
     SELECT id, name, tambon, category, description, highlight,
            latitude, longitude, image_url,
            COALESCE(image_urls, '[]'::jsonb)::TEXT AS image_urls
     FROM places
     WHERE (%(cat)s IS NULL OR category ILIKE %(cat_like)s)
       AND (%(tmb)s IS NULL OR tambon ILIKE %(tmb_like)s)
-      AND (%(kw)s IS NULL OR (
-            name ILIKE %(kw_like)s
-         OR description ILIKE %(kw_like)s
-         OR highlight ILIKE %(kw_like)s
-      ))
+      AND {where_kw}
     ORDER BY name
     LIMIT %(lim)s;
     """
     params = {
         "cat": category,
         "tmb": tambon,
-        "kw": keywords,
         "cat_like": f"%{category}%" if category else None,
         "tmb_like": f"%{tambon}%" if tambon else None,
-        "kw_like": f"%{keywords}%" if keywords else None,
         "lim": limit,
     }
-    with get_conn() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, params)
-            return cur.fetchall()
+    params.update(p_kw)
+    with get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(sql, params)
+        return cur.fetchall()
 
-def search_places_nearby(lat, lng, category=None, tambon=None, keywords=None, limit=10, within_km=15):
-    """
-    ค้นเฉพาะสถานที่ 'ใกล้ฉัน' โดยใช้ Haversine (ระยะทางหน่วยกม.)
-    """
-    sql = """
+def search_places_nearby(lat, lng, category=None, tambon=None, keywords_any=None,
+                         limit=10, within_km=15) -> List[Dict]:
+    where_kw, p_kw = _build_keywords_or("kw", keywords_any)
+    sql = f"""
     SELECT id, name, tambon, category, description, highlight,
            latitude, longitude, image_url,
            COALESCE(image_urls, '[]'::jsonb)::TEXT AS image_urls,
@@ -63,11 +69,7 @@ def search_places_nearby(lat, lng, category=None, tambon=None, keywords=None, li
     WHERE (latitude IS NOT NULL AND longitude IS NOT NULL)
       AND (%(cat)s IS NULL OR category ILIKE %(cat_like)s)
       AND (%(tmb)s IS NULL OR tambon ILIKE %(tmb_like)s)
-      AND (%(kw)s IS NULL OR (
-            name ILIKE %(kw_like)s
-         OR description ILIKE %(kw_like)s
-         OR highlight ILIKE %(kw_like)s
-      ))
+      AND {where_kw}
       AND (
           6371 * acos(
                cos(radians(%(lat)s)) * cos(radians(latitude)) *
@@ -80,16 +82,12 @@ def search_places_nearby(lat, lng, category=None, tambon=None, keywords=None, li
     """
     params = {
         "lat": lat, "lng": lng,
-        "cat": category,
-        "tmb": tambon,
-        "kw": keywords,
+        "cat": category, "tmb": tambon,
         "cat_like": f"%{category}%" if category else None,
         "tmb_like": f"%{tambon}%" if tambon else None,
-        "kw_like": f"%{keywords}%" if keywords else None,
-        "within": within_km,
-        "lim": limit,
+        "within": within_km, "lim": limit,
     }
-    with get_conn() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, params)
-            return cur.fetchall()
+    params.update(p_kw)
+    with get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(sql, params)
+        return cur.fetchall()

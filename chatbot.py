@@ -1,26 +1,32 @@
+# chatbot.py — Pathew Chatbot ที่คุยลื่นเหมือนเพื่อน แต่ยังแนะนำสถานที่ในอำเภอปะทิวได้ชัดเจน
 import json
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Set
 
 import google.generativeai as genai
+from rapidfuzz import fuzz
 from config import GEMINI_API_KEY
 from db import search_places, search_places_nearby
 
-# ----- ตั้งค่า LLM -----
+# ตั้งค่าโมเดล
 genai.configure(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.0-flash-lite"
 model = genai.GenerativeModel(MODEL_NAME)
 
-# รายชื่อตำบลในอำเภอปะทิว
 KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}
 
-# คีย์เวิร์ดที่สื่อว่าเป็น “คำถามเกี่ยวกับสถานที่”
-PLACE_HINTS = [
-    "ร้าน", "คาเฟ่", "ตลาด", "ปั๊ม", "ปั๊มน้ำมัน", "วัด", "ทะเล", "หาด",
-    "ที่เที่ยว", "จุดชมวิว", "ที่กิน", "ที่พัก", "โฮมสเตย์", "รีสอร์ท",
-    "ใกล้ฉัน", "อยู่แถว", "ใกล้", "ห่าง", "กี่โล"
-]
+PREFIXES = ("โรง", "ร้าน", "ศูนย์", "สถาน", "ที่", "บ้าน")
+SYNONYMS = {
+    "ยิม": {"ฟิตเนส", "ฟิตเนสคลับ", "ฟิตเนสเซ็นเตอร์", "โรงยิม"},
+    "ฟิตเนส": {"ยิม", "โรงยิม"},
+    "โรงยิม": {"ยิม", "ฟิตเนส"},
+    "คาเฟ่": {"กาแฟ", "คอฟฟี่", "coffee", "ร้านกาแฟ"},
+    "กาแฟ": {"คาเฟ่", "คอฟฟี่", "ร้านกาแฟ"},
+    "ปั๊มน้ำมัน": {"ปั๊ม", "PTT", "บางจาก", "เชลล์", "พีที"},
+    "ปั๊ม": {"ปั๊มน้ำมัน", "PTT", "บางจาก", "เชลล์", "พีที"},
+    "ตลาด": {"ตลาดนัด", "ตลาดสด", "มาร์เก็ต"},
+}
 
-
+# ---------- Helper ----------
 def _safe_json(text: str) -> dict:
     if not text:
         return {}
@@ -33,58 +39,7 @@ def _safe_json(text: str) -> dict:
     except Exception:
         return {}
 
-
-def _format_history(history: Optional[list]) -> str:
-    """แปลงประวัติแชทเป็นข้อความเรียบง่ายให้โมเดลอ่าน"""
-    if not history:
-        return ""
-    lines = []
-    for m in history[-8:]:
-        role = m.get("role")
-        if role not in ("user", "assistant"):
-            continue
-        speaker = "ผู้ใช้" if role == "user" else "บอท"
-        text = (m.get("content") or "").strip()
-        if text:
-            lines.append(f"{speaker}: {text}")
-    return "\n".join(lines)
-
-
-def analyze_query(user_input: str, history: Optional[list] = None) -> dict:
-    hist = _format_history(history)
-    prompt = f"""
-คุณคือระบบช่วยหาสถานที่ใน "อำเภอปะทิว" จังหวัดชุมพร เท่านั้น
-หน้าที่: วิเคราะห์คำถามผู้ใช้แล้วสรุปเป็น JSON เท่านั้น ห้ามมีคำอธิบายอื่น
-ห้ามแนะนำสถานที่นอกอำเภอปะทิว
-
-บทสนทนาก่อนหน้า:
-{hist if hist else "—"}
-
-คำถามล่าสุดของผู้ใช้: "{user_input}"
-
-จงตอบเป็น JSON โครงสร้างนี้เท่านั้น:
-{{
-  "category": "ประเภทสถานที่ เช่น ร้านอาหาร/คาเฟ่/ปั๊มน้ำมัน (ไม่รู้ให้ใส่ null)",
-  "tambon": "ชื่อตำบลในอำเภอปะทิว (ไม่รู้ให้ใส่ null)",
-  "price": "ถูก/ปานกลาง/แพง (ถ้ามี ไม่รู้ให้ใส่ null)",
-  "keywords": "คำค้นเพิ่ม เช่น ชื่อสถานที่ เมนู หรือบรรยากาศ (ไม่มีให้ใส่ null)"
-}}
-"""
-    try:
-        res = model.generate_content(prompt)
-        data = _safe_json(res.text)
-        return {
-            "category": data.get("category"),
-            "tambon": data.get("tambon"),
-            "price": data.get("price"),
-            "keywords": data.get("keywords"),
-        }
-    except Exception:
-        return {"category": None, "tambon": None, "price": None, "keywords": None}
-
-
 def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Optional[str]:
-    """รับเฉพาะตำบลที่ปรากฏจริงในข้อความ และต้องเป็นตำบลในอำเภอปะทิว"""
     if not predicted_tambon:
         return None
     ui = user_input.strip().lower()
@@ -93,115 +48,126 @@ def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Opti
             return t
     return None
 
+def _normalize_terms(text: str) -> List[str]:
+    toks = [t.strip() for t in text.replace(",", " ").split() if t.strip()]
+    return toks if toks else ([text.strip()] if text.strip() else [])
 
-def _is_place_intent(user_input: str, analysis: dict) -> bool:
-    """
-    บอกว่า "ข้อความนี้ตั้งใจถามหาสถานที่ไหม"
-    - ถ้า LLM ดึง category/keywords มาได้ → ใช่
-    - หรือถ้ามีคำใบ้จาก PLACE_HINTS → ใช่
-    """
-    ui = (user_input or "").strip().lower()
-    if analysis.get("category") or analysis.get("keywords"):
-        return True
-    return any(h in ui for h in PLACE_HINTS)
+def _expand_keywords_any(user_input: str, llm_keywords: Optional[str]) -> List[str]:
+    pool: Set[str] = set()
+    def add(t: str):
+        t = t.strip().lower()
+        if not t:
+            return
+        pool.add(t)
+        for p in PREFIXES:
+            if t.startswith(p) and len(t) > len(p) + 1:
+                pool.add(t[len(p):])
+        if t in SYNONYMS:
+            pool.update(x.lower() for x in SYNONYMS[t])
+    for tk in _normalize_terms(user_input):
+        add(tk)
+    if llm_keywords and isinstance(llm_keywords, str):
+        for tk in _normalize_terms(llm_keywords):
+            add(tk)
+    return [t for t in sorted(pool) if 1 <= len(t) <= 64]
 
+def _fuzzy_filter(rows: List[Dict], query_text: str, extra_terms: Optional[List[str]] = None,
+                  threshold: int = 55, top_k: int = 12) -> List[Dict]:
+    if not rows:
+        return rows
+    terms = []
+    if query_text:
+        terms.append(query_text)
+    if extra_terms:
+        terms.extend(extra_terms)
+    def row_text(r):
+        return " ".join([
+            str(r.get("name") or ""),
+            str(r.get("description") or ""),
+            str(r.get("highlight") or ""),
+            str(r.get("tambon") or ""),
+            str(r.get("category") or ""),
+        ]).lower()
+    scored = []
+    for r in rows:
+        blob = row_text(r)
+        score = max(fuzz.partial_ratio(t.lower(), blob) for t in terms if t.strip()) if terms else 0
+        scored.append((score, r))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    filtered = [r for s, r in scored if s >= threshold]
+    return filtered[:top_k] if filtered else [r for _, r in scored[:top_k]]
 
-def get_answer(
-    user_input: str,
-    user_lat: Optional[float] = None,
-    user_lng: Optional[float] = None,
-    history: Optional[list] = None,
-) -> Tuple[str, List[Dict]]:
-    """
-    ใช้ LLM ช่วยเรียบเรียง แต่ข้อมูลสถานที่ต้องมาจาก DB เท่านั้น
-    รองรับการถามต่อ: "กี่โล", "ใกล้มั้ย", "ใกล้สุด"
-    และจะไม่แนะนำสถานที่ถ้าผู้ใช้ยังไม่ได้ถามถึงสถานที่
-    """
+# ---------- เจตนา (intent) ----------
+def _understand(user_input: str) -> dict:
+    sys = (
+        "คุณคือผู้ช่วยท้องถิ่นอำเภอปะทิว พูดธรรมชาติ สุภาพแบบเพื่อน "
+        "ถ้าผู้ใช้ถามหาสถานที่ในปะทิว → want_search=true; "
+        "ถ้าเป็นการคุยทั่วไป → want_search=false."
+    )
+    prompt = f"""{sys}
 
-    # ----- ตรวจสอบว่าผู้ใช้ถามต่อเกี่ยวกับระยะทางหรือใกล้สุด -----
-    ask_distance = any(kw in user_input for kw in ["กี่โล", "กี่กิโล", "ใกล้", "ไกล", "ระยะทาง"])
-    ask_nearest  = any(kw in user_input for kw in ["ใกล้สุด", "ใกล้ที่สุด", "อันแรก"])
+ตอบเป็น JSON เท่านั้น:
+{{
+  "want_search": true|false,
+  "category": null | "ประเภทสถานที่",
+  "tambon": null | "ชื่อตำบลในปะทิว",
+  "keywords": null | "คีย์เวิร์ดเพิ่ม",
+  "tone_hint": "โทนการตอบแบบสั้น ๆ"
+}}
 
-    if (ask_distance or ask_nearest) and history:
-        for h in reversed(history):
-            if h.get("role") == "assistant" and h.get("last_places"):
-                last_places = h["last_places"]
-                if last_places:
-                    target = last_places[0]  # ตัวแรก = ใกล้สุด เพราะ search_places_nearby sort ระยะทางแล้ว
-                    dist = target.get("distance_km")
-                    if ask_nearest:
-                        msg = f"สถานที่ที่ใกล้คุณที่สุดคือ **{target['name']}**"
-                        if dist is not None:
-                            msg += f" ห่างจากคุณประมาณ {round(float(dist),1)} กม."
-                        msg += " หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
-                        return (msg, last_places)
-                    if ask_distance and dist is not None:
-                        km = round(float(dist), 1)
-                        msg = f"{target['name']} อยู่ห่างจากคุณประมาณ {km} กม. หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
-                        return (msg, last_places)
-
-    # ----- วิเคราะห์ query -----
-    analysis = analyze_query(user_input, history=history)
-    # ถ้ายังไม่ใช่เจตนาถามหาสถานที่ → อย่าแนะนำอะไร
-    if not _is_place_intent(user_input, analysis):
-        help_msg = (
-            "ผมช่วยหา “สถานที่ในอำเภอปะทิว” ให้ได้ครับ เช่น:\n"
-            "- ร้านอาหาร/คาเฟ่ (ระบุเมนูได้ เช่น ข้าวผัดปู)\n"
-            "- ปั๊มน้ำมัน/ที่จอดรถ/จุดชมวิว\n"
-            "- ค้นหา “ใกล้ฉัน” โดยใช้พิกัดปัจจุบัน\n\n"
-            "ลองพิมพ์เช่น: “ตลาดเลริวเซ็นอยู่ตรงไหน”, “คาเฟ่ใกล้ฉัน”, หรือ “ร้านอาหารแถวชุมโค”"
-        )
-        return (help_msg, [])
-
-    category = analysis.get("category")
-    tambon_pred = analysis.get("tambon")
-    keywords = analysis.get("keywords")
-    tambon = _tambon_if_in_text(user_input, tambon_pred)
-
-    # ----- ค้นหาข้อมูลจาก DB -----
-    if user_lat is not None and user_lng is not None:
-        results = search_places_nearby(
-            user_lat, user_lng,
-            category=category, tambon=tambon, keywords=keywords,
-            limit=5, within_km=15
-        )
-    else:
-        results = search_places(category=category, tambon=tambon, keywords=keywords, limit=5)
-
-    if not results:
-        return ("ยังไม่พบสถานที่ที่ตรงกับคำค้นในอำเภอปะทิวครับ", [])
-
-    # ----- เตรียมข้อมูลจริงจาก DB -----
-    places_info = []
-    for r in results:
-        info = f"- {r['name']} (ประเภท: {r.get('category','')}, ตำบล {r.get('tambon','-')})"
-        if r.get("distance_km"):
-            info += f" ห่างจากคุณประมาณ {round(float(r['distance_km']),1)} กม."
-        if r.get("highlight"):
-            info += f" จุดเด่น: {r['highlight']}"
-        places_info.append(info)
-
-    context = "\n".join(places_info)
-
-    # ----- ใช้ LLM เรียบเรียงคำตอบ -----
-    prompt = f"""
-คุณคือผู้ช่วย AI แนะนำสถานที่ใน "อำเภอปะทิว" จังหวัดชุมพร
-***ข้อมูลข้อเท็จจริงที่คุณต้องใช้ มาจากรายการด้านล่างนี้เท่านั้น***
-ห้ามสร้างข้อมูลใหม่ และต้องรายงาน "ระยะทาง (กม.)" ด้วยถ้ามี
-
-คำถามของผู้ใช้: "{user_input}"
-
-สถานที่ที่ค้นเจอ:
-{context}
-
-โปรดตอบกลับผู้ใช้อย่างสุภาพ สมูท และเป็นธรรมชาติ
-ใช้เฉพาะข้อมูลจากรายการข้างต้น ห้ามแต่งเพิ่ม
-ลงท้ายด้วย: "หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
+ผู้ใช้: "{user_input}"
 """
     try:
         res = model.generate_content(prompt)
-        reply = res.text.strip()
+        data = _safe_json(res.text)
+        return {
+            "want_search": bool(data.get("want_search")),
+            "category": data.get("category"),
+            "tambon": data.get("tambon"),
+            "keywords": data.get("keywords"),
+            "tone_hint": data.get("tone_hint") or "",
+        }
     except Exception:
-        reply = "เจอสถานที่น่าสนใจให้ครับ หวังว่าจะเจอสถานที่ตรงตามที่คุณต้องการนะครับ"
+        return {"want_search": False, "category": None, "tambon": None, "keywords": None, "tone_hint": ""}
 
-    return (reply, results)
+def _reply_chitchat(user_input: str, tone_hint: str) -> str:
+    prompt = (
+        "บทบาท: เพื่อนผู้ช่วยท้องถิ่นปะทิว คุยสั้น เป็นกันเอง ไม่ยัดเยียดกลับไปหาสถานที่ "
+        f"โทน: {tone_hint}\nผู้ใช้: {user_input}\nตอบ:"
+    )
+    try:
+        res = model.generate_content(prompt)
+        return (res.text or "").strip() or "ครับผม "
+    except Exception:
+        return "ครับผม "
+
+# ---------- ฟังก์ชันหลัก ----------
+def get_answer(user_input: str,
+               user_lat: Optional[float] = None,
+               user_lng: Optional[float] = None) -> Tuple[str, List[Dict]]:
+    u = _understand(user_input)
+
+    if not u.get("want_search"):
+        return (_reply_chitchat(user_input, u.get("tone_hint", "")), [])
+
+    category = u.get("category")
+    tambon = _tambon_if_in_text(user_input, u.get("tambon"))
+    keywords_any = _expand_keywords_any(user_input, u.get("keywords"))
+
+    if user_lat is not None and user_lng is not None:
+        rows = search_places_nearby(
+            user_lat, user_lng,
+            category=category, tambon=tambon,
+            keywords_any=keywords_any, limit=20, within_km=20
+        )
+    else:
+        rows = search_places(category=category, tambon=tambon, keywords_any=keywords_any, limit=30)
+
+    rows = _fuzzy_filter(rows, user_input, extra_terms=keywords_any, threshold=55, top_k=12)
+
+    if not rows:
+        return ("ขอโทษนะครับ เหมือนผมอาจจะเข้าใจคลาดเคลื่อนนิดหน่อย ลองช่วยถามใหม่อีกทีได้ไหมครับ ", [])
+
+    intro = "ตอนนี้มีสถานที่ไหนที่คุณต้องการบ้างมั้ยครับ บอกผมมาได้เลยนะ เผื่อผมมีสถานที่ใกล้เคียงกับความต้องการของคุณ "
+    outro = "ถ้ายังไม่ตรงใจ บอกเพิ่มได้นะครับ เดี๋ยวผมช่วยหาต่อให้เองครับ"
+    return (f"{intro}\n\n{outro}", rows)
