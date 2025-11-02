@@ -108,6 +108,30 @@ def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str],
     scored.sort(key=lambda x: x[0], reverse=True)
     return [r for _, r in scored[:top_k]]
 
+# ----- Allowed categories by intent (ใช้กรองผลลัพธ์ให้ตรงหมวด) -----
+ALLOWED_BY_INTENT = {
+    "ร้านอาหาร": ["ร้านอาหาร", "อาหาร", "ข้าว", "ซีฟู้ด", "ก๋วยเตี๋ยว", "ข้าวต้ม", "ตามสั่ง", "สตรีทฟู้ด", "ของกิน"],
+    "คาเฟ่": ["คาเฟ่", "กาแฟ", "เครื่องดื่ม", "ของหวาน", "ชา", "ชาเย็น", "เบเกอรี่", "คอฟฟี่"],
+    "ยิม/ฟิตเนส": ["ยิม", "ฟิตเนส", "ออกกำลังกาย", "เทรนนิ่ง", "ฟิตเนต"],
+    "ร้านซ่อมรถ": ["ซ่อมรถ", "อู่", "ศูนย์", "ยาง", "ปะยาง", "แบตเตอรี่", "ช่วงล่าง", "แม็ก"],
+    "ปั๊มน้ำมัน": ["ปั๊ม", "ปั๊มน้ำมัน", "ptt", "บางจาก", "เชลล์", "พีที"],
+    "ตลาด": ["ตลาด", "ตลาดสด", "ตลาดนัด"],
+    "วัด": ["วัด", "ไหว้พระ", "ศาสนสถาน"],
+    "ที่พัก": ["ที่พัก", "รีสอร์ท", "โฮมสเตย์", "โรงแรม", "เกสต์เฮาส์"],
+    "สถานที่ท่องเที่ยว": ["สถานที่ท่องเที่ยว", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "แลนด์มาร์ก", "ทะเล"],
+}
+
+def _is_allowed_for_intent(intent: Optional[str], place: Dict) -> bool:
+    """คืน True ถ้าสถานที่เข้ากับเจตนา intent (เช็คทั้ง category และชื่อร้าน)"""
+    if not intent:
+        return True
+    allow = ALLOWED_BY_INTENT.get(intent)
+    if not allow:
+        return True
+    cat = _norm(place.get("category") or "")
+    name = _norm(place.get("name") or "")
+    return any(k in cat or k in name for k in allow)
+
 # ===== เข้าใจเจตนา (LLM + ตัวอย่าง) =====
 def _understand(user_input: str, history_text: str) -> dict:
     sys = (
@@ -181,7 +205,6 @@ def get_answer(
     if not u.get("want_search"):
         local_cat = _local_guess_category(user_input)
         txt = user_input.lower()
-        # ถ้าประโยคมีคำสื่อถึงของกิน/ของดื่ม → ให้ค้นทันที
         if any(w in txt for w in ["ชาเย็น", "ชา", "กาแฟ", "นม", "ของหวาน", "น้ำ", "ข้าว", "อาหาร", "หิว", "กิน"]):
             u["want_search"] = True
             if any(w in txt for w in ["ชา", "กาแฟ", "คาเฟ่", "นม", "ของหวาน"]):
@@ -192,7 +215,7 @@ def get_answer(
             u["want_search"] = True
             u["category"] = u.get("category") or local_cat
 
-    # ถ้าสุดท้ายแล้วยังไม่ใช่การค้นหา → คุยตามธรรมชาติ
+    # ถ้ายังไม่ใช่การค้นหา → คุยตามธรรมชาติ
     if not u.get("want_search"):
         return (_reply_chitchat(user_input, history_text), [])
 
@@ -200,7 +223,7 @@ def get_answer(
     prefer_tambon = u.get("tambon")
     keywords = _extract_keywords(user_input, u.get("keywords"))
 
-    # 1) ค้นรอบแรก (ใช้คีย์เวิร์ด + tambon ถ้ามี) และจัดอันดับด้วยคะแนน
+    # 1) ค้นรอบแรก (ใช้คีย์เวิร์ด + tambon ถ้ามี)
     if user_lat is not None and user_lng is not None:
         base = search_places_nearby(
             user_lat, user_lng,
@@ -213,7 +236,12 @@ def get_answer(
 
     ranked = _rank(base, user_input, prefer_category, prefer_tambon, top_k=12)
 
-    # 2) ถ้ายังน้อย → ผ่อนเงื่อนไข (ไม่ใช้คีย์เวิร์ด, ขยายรัศมี)
+    # ✨ กรองให้ตรงหมวดตามเจตนา (กันเคสหิวข้าวแต่ไปโผล่ชายหาด/ซ่อมรถ)
+    filtered = [r for r in ranked if _is_allowed_for_intent(prefer_category, r)]
+    if filtered:
+        ranked = filtered
+
+    # 2) ถ้ายังน้อย → ผ่อนเงื่อนไข (ไม่ใช้คีย์เวิร์ด/ขยายรัศมี)
     if not ranked:
         if user_lat is not None and user_lng is not None:
             base2 = search_places_nearby(
@@ -225,6 +253,11 @@ def get_answer(
             base2 = search_places(category=None, tambon=prefer_tambon,
                                   keywords_any=None, limit=60)
         ranked = _rank(base2, user_input, prefer_category, prefer_tambon, top_k=12)
+
+        # กรองหมวดอีกครั้ง (ถ้าพอมีให้ใช้)
+        filtered2 = [r for r in ranked if _is_allowed_for_intent(prefer_category, r)]
+        if filtered2:
+            ranked = filtered2
 
     if not ranked:
         return ("ขอโทษนะครับ เหมือนผมอาจจะเข้าใจคลาดเคลื่อนไปนิดหน่อย ลองช่วยถามใหม่อีกทีได้ไหมครับ", [])
