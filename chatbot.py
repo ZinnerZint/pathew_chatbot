@@ -1,4 +1,3 @@
-# chatbot.py — Pathew Chatbot ที่คุยลื่นเหมือนเพื่อน แต่ยังแนะนำสถานที่ในอำเภอปะทิวได้ชัดเจน
 import json
 from typing import List, Dict, Tuple, Optional, Set
 
@@ -12,21 +11,27 @@ genai.configure(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.0-flash-lite"
 model = genai.GenerativeModel(MODEL_NAME)
 
+# โฟกัสพื้นที่ปะทิว
 KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}
 
+# คำพ้อง + คำนำหน้า
 PREFIXES = ("โรง", "ร้าน", "ศูนย์", "สถาน", "ที่", "บ้าน")
 SYNONYMS = {
+    # ฟิตเนส/ยิม
     "ยิม": {"ฟิตเนส", "ฟิตเนสคลับ", "ฟิตเนสเซ็นเตอร์", "โรงยิม"},
     "ฟิตเนส": {"ยิม", "โรงยิม"},
     "โรงยิม": {"ยิม", "ฟิตเนส"},
+    # คาเฟ่/กาแฟ
     "คาเฟ่": {"กาแฟ", "คอฟฟี่", "coffee", "ร้านกาแฟ"},
     "กาแฟ": {"คาเฟ่", "คอฟฟี่", "ร้านกาแฟ"},
+    # ปั๊ม
     "ปั๊มน้ำมัน": {"ปั๊ม", "PTT", "บางจาก", "เชลล์", "พีที"},
     "ปั๊ม": {"ปั๊มน้ำมัน", "PTT", "บางจาก", "เชลล์", "พีที"},
+    # ตลาด
     "ตลาด": {"ตลาดนัด", "ตลาดสด", "มาร์เก็ต"},
 }
 
-# ---------- Helper ----------
+# ---------- Helpers ----------
 def _safe_json(text: str) -> dict:
     if not text:
         return {}
@@ -39,7 +44,33 @@ def _safe_json(text: str) -> dict:
     except Exception:
         return {}
 
+def _history_to_text(history: Optional[List[Dict]], max_turns: int = 8) -> str:
+    """
+    แปลงประวัติแชทล่าสุดเป็นข้อความสั้น ๆ เพื่อให้โมเดลเข้าใจบริบท
+    history: [{"role":"user"|"assistant","content": "..."}]
+    """
+    if not history:
+        return ""
+    lines = []
+    for m in history[-max_turns:]:
+        role = "ผู้ใช้" if m.get("role") == "user" else "AI"
+        content = str(m.get("content") or "").strip()
+        if content:
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+def _infer_tambon_from_history(history_text: str) -> Optional[str]:
+    """ถ้าผู้ใช้ไม่ได้ระบุตำบลในรอบนี้ ลองดูจากบทสนทนาก่อนหน้า (เลือกอันที่ปรากฏล่าสุด)"""
+    if not history_text:
+        return None
+    last_found = None
+    for t in KNOWN_TAMBON:
+        if t in history_text:
+            last_found = t  # เก็บตัวที่เจอล่าสุดทับไปเรื่อย ๆ
+    return last_found
+
 def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Optional[str]:
+    """รับเฉพาะตำบลที่ปรากฏจริงในข้อความรอบนี้ (กัน LLM เดามั่ว)"""
     if not predicted_tambon:
         return None
     ui = user_input.strip().lower()
@@ -53,6 +84,7 @@ def _normalize_terms(text: str) -> List[str]:
     return toks if toks else ([text.strip()] if text.strip() else [])
 
 def _expand_keywords_any(user_input: str, llm_keywords: Optional[str]) -> List[str]:
+    """แตกคำ + ตัดคำนำหน้า + คำพ้อง → ใช้แบบ OR"""
     pool: Set[str] = set()
     def add(t: str):
         t = t.strip().lower()
@@ -73,6 +105,7 @@ def _expand_keywords_any(user_input: str, llm_keywords: Optional[str]) -> List[s
 
 def _fuzzy_filter(rows: List[Dict], query_text: str, extra_terms: Optional[List[str]] = None,
                   threshold: int = 55, top_k: int = 12) -> List[Dict]:
+    """กันพิมพ์ผิดแบบเบา ๆ ด้วย partial_ratio; ใช้คะแนนสูงสุดของทุก term"""
     if not rows:
         return rows
     terms = []
@@ -97,16 +130,26 @@ def _fuzzy_filter(rows: List[Dict], query_text: str, extra_terms: Optional[List[
     filtered = [r for s, r in scored if s >= threshold]
     return filtered[:top_k] if filtered else [r for _, r in scored[:top_k]]
 
-# ---------- เจตนา (intent) ----------
-def _understand(user_input: str) -> dict:
+# ---------- ทำความเข้าใจเจตนา (รับ history) ----------
+def _understand(user_input: str, history_text: str) -> dict:
+    """
+    - ถ้าผู้ใช้กำลังคุยเรื่องสถานที่ → want_search=true พร้อมพารามิเตอร์
+    - ถ้าคุยทั่วไป → want_search=false (คุยเป็นธรรมชาติ)
+    ใช้ history_text เพื่อให้โมเดลเข้าใจความต่อเนื่อง
+    """
     sys = (
         "คุณคือผู้ช่วยท้องถิ่นอำเภอปะทิว พูดธรรมชาติ สุภาพแบบเพื่อน "
-        "ถ้าผู้ใช้ถามหาสถานที่ในปะทิว → want_search=true; "
-        "ถ้าเป็นการคุยทั่วไป → want_search=false."
+        "โฟกัสเฉพาะอำเภอปะทิวเท่านั้น "
+        "ถ้าผู้ใช้ขอหาสถานที่/แนะนำ ให้ตั้ง want_search=true; "
+        "ถ้าเป็นการคุยทั่วไป ให้ตั้ง want_search=false. "
+        "ใช้บริบทก่อนหน้าเพื่อคงความต่อเนื่องของหัวข้อสนทนา"
     )
     prompt = f"""{sys}
 
-ตอบเป็น JSON เท่านั้น:
+บริบทก่อนหน้า (ย่อ):
+{history_text or "(ไม่มีประวัติ)"}
+
+สรุปเป็น JSON เท่านั้น:
 {{
   "want_search": true|false,
   "category": null | "ประเภทสถานที่",
@@ -115,7 +158,7 @@ def _understand(user_input: str) -> dict:
   "tone_hint": "โทนการตอบแบบสั้น ๆ"
 }}
 
-ผู้ใช้: "{user_input}"
+ผู้ใช้ (ล่าสุด): "{user_input}"
 """
     try:
         res = model.generate_content(prompt)
@@ -130,30 +173,51 @@ def _understand(user_input: str) -> dict:
     except Exception:
         return {"want_search": False, "category": None, "tambon": None, "keywords": None, "tone_hint": ""}
 
-def _reply_chitchat(user_input: str, tone_hint: str) -> str:
+def _reply_chitchat(user_input: str, tone_hint: str, history_text: str) -> str:
+    """ตอบคุยเล่นสั้น ๆ ลื่น ๆ โดยคำนึงถึงบริบทก่อนหน้า"""
     prompt = (
-        "บทบาท: เพื่อนผู้ช่วยท้องถิ่นปะทิว คุยสั้น เป็นกันเอง ไม่ยัดเยียดกลับไปหาสถานที่ "
-        f"โทน: {tone_hint}\nผู้ใช้: {user_input}\nตอบ:"
+        "บทบาท: เพื่อนผู้ช่วยท้องถิ่นปะทิว คุยสั้น เป็นกันเอง ไม่ยัดเยียดกลับไปหาสถานที่\n"
+        f"บริบทก่อนหน้า (ย่อ):\n{history_text or '(ไม่มีประวัติ)'}\n\n"
+        f"โทนที่ควรได้: {tone_hint}\n"
+        f"ผู้ใช้ (ล่าสุด): {user_input}\n"
+        "ตอบ:"
     )
     try:
         res = model.generate_content(prompt)
-        return (res.text or "").strip() or "ครับผม "
+        return (res.text or "").strip() or "ครับผม"
     except Exception:
-        return "ครับผม "
+        return "ครับผม"
 
 # ---------- ฟังก์ชันหลัก ----------
-def get_answer(user_input: str,
-               user_lat: Optional[float] = None,
-               user_lng: Optional[float] = None) -> Tuple[str, List[Dict]]:
-    u = _understand(user_input)
+def get_answer(
+    user_input: str,
+    user_lat: Optional[float] = None,
+    user_lng: Optional[float] = None,
+    history: Optional[List[Dict]] = None,   # ← รับประวัติแชทเข้ามา
+) -> Tuple[str, List[Dict]]:
+    """
+    คืน (ข้อความตอบ, รายการสถานที่)
+    - ไม่มีโหมดให้ผู้ใช้เห็น: ถ้าเขาคุย → คุย; ถ้าเขาขอหา → หา
+    - ใช้ history เพื่อความต่อเนื่อง (จำหัวข้อ/ตำบลจากที่คุยกันก่อนหน้าได้)
+    """
+    history_text = _history_to_text(history, max_turns=8)
 
+    u = _understand(user_input, history_text)
+
+    # คุยทั่วไป → ตอบธรรมชาติ จบ
     if not u.get("want_search"):
-        return (_reply_chitchat(user_input, u.get("tone_hint", "")), [])
+        return (_reply_chitchat(user_input, u.get("tone_hint", ""), history_text), [])
 
+    # หาในปะทิว → จัดพารามิเตอร์ค้นหา
     category = u.get("category")
-    tambon = _tambon_if_in_text(user_input, u.get("tambon"))
+    # ถ้ารอบนี้ไม่ระบุตำบล ลองใช้ของเดิมจากประวัติ (แต่ถ้ารอบนี้ระบุก็ใช้รอบนี้)
+    tambon_now = _tambon_if_in_text(user_input, u.get("tambon"))
+    tambon_hist = _infer_tambon_from_history(history_text)
+    tambon = tambon_now or tambon_hist
+
     keywords_any = _expand_keywords_any(user_input, u.get("keywords"))
 
+    # ค้นหา (ถ้ามีพิกัด → ใกล้ฉันก่อน)
     if user_lat is not None and user_lng is not None:
         rows = search_places_nearby(
             user_lat, user_lng,
@@ -163,11 +227,13 @@ def get_answer(user_input: str,
     else:
         rows = search_places(category=category, tambon=tambon, keywords_any=keywords_any, limit=30)
 
+    # กันพิมพ์ผิด + เรียงความใกล้เคียง
     rows = _fuzzy_filter(rows, user_input, extra_terms=keywords_any, threshold=55, top_k=12)
 
     if not rows:
-        return ("ขอโทษนะครับ เหมือนผมอาจจะเข้าใจคลาดเคลื่อนนิดหน่อย ลองช่วยถามใหม่อีกทีได้ไหมครับ ", [])
+        return ("ขอโทษนะครับ เหมือนผมอาจจะเข้าใจคลาดเคลื่อนนิดหน่อย ลองช่วยถามใหม่อีกทีได้ไหมครับ", [])
 
-    intro = "ตอนนี้มีสถานที่ไหนที่คุณต้องการบ้างมั้ยครับ บอกผมมาได้เลยนะ เผื่อผมมีสถานที่ใกล้เคียงกับความต้องการของคุณ "
+    # โทนเปิด-ปิดบทสนทนา (ไม่พูดถึงปักหมุด/งบ/เมนู)
+    intro = "ตอนนี้มีสถานที่ไหนที่คุณต้องการบ้างมั้ยครับ บอกผมมาได้เลยนะ เผื่อผมมีสถานที่ใกล้เคียงกับความต้องการของคุณ"
     outro = "ถ้ายังไม่ตรงใจ บอกเพิ่มได้นะครับ เดี๋ยวผมช่วยหาต่อให้เองครับ"
     return (f"{intro}\n\n{outro}", rows)
