@@ -15,7 +15,7 @@ def get_conn():
     )
 
 def _build_keywords_or(prefix: str, keywords_any: Optional[List[str]]):
-    """สร้างเงื่อนไข OR สำหรับคีย์เวิร์ดหลายคำ"""
+    """สร้างเงื่อนไข OR สำหรับคีย์เวิร์ดหลายคำ (match หลายคอลัมน์)"""
     if not keywords_any:
         return "TRUE", {}
     clauses, params = [], {}
@@ -23,18 +23,26 @@ def _build_keywords_or(prefix: str, keywords_any: Optional[List[str]]):
         key = f"{prefix}{i}"
         params[key] = f"%{term}%"
         clauses.append(
-            f"(name ILIKE %({key})s OR description ILIKE %({key})s OR highlight ILIKE %({key})s)"
+            "("
+            "name ILIKE %({k})s OR "
+            "description ILIKE %({k})s OR "
+            "highlight ILIKE %({k})s OR "
+            "category ILIKE %({k})s OR "
+            "tambon ILIKE %({k})s"
+            ")".format(k=key)
         )
     return "(" + " OR ".join(clauses) + ")", params
 
-def search_places(category=None, tambon=None, keywords_any=None, limit=10) -> List[Dict]:
+def search_places(category=None, tambon=None, keywords_any=None, limit=30) -> List[Dict]:
     where_kw, p_kw = _build_keywords_or("kw", keywords_any)
     sql = f"""
     SELECT id, name, tambon, category, description, highlight,
            latitude, longitude, image_url,
            COALESCE(image_urls, '[]'::jsonb)::TEXT AS image_urls
     FROM places
-    WHERE (%(cat)s IS NULL OR category ILIKE %(cat_like)s)
+    WHERE
+      -- ยอมให้ category/tambon เป็นตัวกรองแบบหลวม (LIKE) และคีย์เวิร์ดช่วย OR
+      (%(cat)s IS NULL OR category ILIKE %(cat_like)s OR name ILIKE %(cat_like)s)
       AND (%(tmb)s IS NULL OR tambon ILIKE %(tmb_like)s)
       AND {where_kw}
     ORDER BY name
@@ -53,7 +61,7 @@ def search_places(category=None, tambon=None, keywords_any=None, limit=10) -> Li
         return cur.fetchall()
 
 def search_places_nearby(lat, lng, category=None, tambon=None, keywords_any=None,
-                         limit=10, within_km=15) -> List[Dict]:
+                         limit=30, within_km=20) -> List[Dict]:
     where_kw, p_kw = _build_keywords_or("kw", keywords_any)
     sql = f"""
     SELECT id, name, tambon, category, description, highlight,
@@ -66,7 +74,7 @@ def search_places_nearby(lat, lng, category=None, tambon=None, keywords_any=None
            ) AS distance_km
     FROM places
     WHERE (latitude IS NOT NULL AND longitude IS NOT NULL)
-      AND (%(cat)s IS NULL OR category ILIKE %(cat_like)s)
+      AND (%(cat)s IS NULL OR category ILIKE %(cat_like)s OR name ILIKE %(cat_like)s)
       AND (%(tmb)s IS NULL OR tambon ILIKE %(tmb_like)s)
       AND {where_kw}
       AND (
