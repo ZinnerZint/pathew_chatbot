@@ -1,34 +1,27 @@
 import json
-from typing import List, Dict, Tuple, Optional, Set
-
+from typing import List, Dict, Tuple, Optional
 import google.generativeai as genai
 from rapidfuzz import fuzz
 from config import GEMINI_API_KEY
 from db import search_places, search_places_nearby
 
-# ตั้งค่าโมเดล
+# -------------------------------
+# ตั้งค่าโมเดล Gemini
+# -------------------------------
 genai.configure(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.0-flash-lite"
 model = genai.GenerativeModel(MODEL_NAME)
 
-# โฟกัสพื้นที่ปะทิว
+# -------------------------------
+# ตำบลในอำเภอปะทิว (กันหลุดพื้นที่)
+# -------------------------------
 KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}
 
-# คำพ้อง + คำนำหน้า
-PREFIXES = ("โรง", "ร้าน", "ศูนย์", "สถาน", "ที่", "บ้าน")
-SYNONYMS = {
-    "ยิม": {"ฟิตเนส", "ฟิตเนสคลับ", "ฟิตเนสเซ็นเตอร์", "โรงยิม"},
-    "ฟิตเนส": {"ยิม", "โรงยิม"},
-    "โรงยิม": {"ยิม", "ฟิตเนส"},
-    "คาเฟ่": {"กาแฟ", "คอฟฟี่", "coffee", "ร้านกาแฟ"},
-    "กาแฟ": {"คาเฟ่", "คอฟฟี่", "ร้านกาแฟ"},
-    "ปั๊มน้ำมัน": {"ปั๊ม", "PTT", "บางจาก", "เชลล์", "พีที"},
-    "ปั๊ม": {"ปั๊มน้ำมัน", "PTT", "บางจาก", "เชลล์", "พีที"},
-    "ตลาด": {"ตลาดนัด", "ตลาดสด", "มาร์เก็ต"},
-}
-
-# ---------- Helper ----------
+# -------------------------------
+# Helper Functions
+# -------------------------------
 def _safe_json(text: str) -> dict:
+    """กัน Gemini ตอบโค้ดบล็อก JSON"""
     if not text:
         return {}
     t = text.strip()
@@ -41,7 +34,7 @@ def _safe_json(text: str) -> dict:
         return {}
 
 def _history_to_text(history: Optional[List[Dict]], max_turns: int = 8) -> str:
-    """รวมข้อความเก่าล่าสุดเป็นบริบท"""
+    """แปลงประวัติแชทเป็นข้อความสั้น ๆ ให้โมเดลเข้าใจบริบท"""
     if not history:
         return ""
     lines = []
@@ -52,98 +45,65 @@ def _history_to_text(history: Optional[List[Dict]], max_turns: int = 8) -> str:
             lines.append(f"{role}: {content}")
     return "\n".join(lines)
 
-def _infer_tambon_from_history(history_text: str) -> Optional[str]:
-    """ถ้าไม่ได้ระบุตำบลในรอบนี้ ลองใช้ตำบลจากบทสนทนาก่อนหน้า"""
-    if not history_text:
-        return None
-    last_found = None
-    for t in KNOWN_TAMBON:
-        if t in history_text:
-            last_found = t
-    return last_found
-
-def _tambon_if_in_text(user_input: str, predicted_tambon: Optional[str]) -> Optional[str]:
-    if not predicted_tambon:
-        return None
-    ui = user_input.strip().lower()
-    for t in KNOWN_TAMBON:
-        if t in ui and predicted_tambon == t:
-            return t
-    return None
-
-def _normalize_terms(text: str) -> List[str]:
-    toks = [t.strip() for t in text.replace(",", " ").split() if t.strip()]
-    return toks if toks else ([text.strip()] if text.strip() else [])
-
-def _expand_keywords_any(user_input: str, llm_keywords: Optional[str]) -> List[str]:
-    pool: Set[str] = set()
-    def add(t: str):
-        t = t.strip().lower()
-        if not t:
-            return
-        pool.add(t)
-        for p in PREFIXES:
-            if t.startswith(p) and len(t) > len(p) + 1:
-                pool.add(t[len(p):])
-        if t in SYNONYMS:
-            pool.update(x.lower() for x in SYNONYMS[t])
-    for tk in _normalize_terms(user_input):
-        add(tk)
-    if llm_keywords and isinstance(llm_keywords, str):
-        for tk in _normalize_terms(llm_keywords):
-            add(tk)
-    return [t for t in sorted(pool) if 1 <= len(t) <= 64]
-
-def _fuzzy_filter(rows: List[Dict], query_text: str, extra_terms: Optional[List[str]] = None,
-                  threshold: int = 55, top_k: int = 12) -> List[Dict]:
+def _fuzzy_filter(rows: List[Dict], query_text: str, threshold: int = 55, top_k: int = 12) -> List[Dict]:
+    """จัดเรียงผลลัพธ์ตามความใกล้เคียงกับข้อความค้นหา"""
     if not rows:
-        return rows
-    terms = []
-    if query_text:
-        terms.append(query_text)
-    if extra_terms:
-        terms.extend(extra_terms)
-    def row_text(r):
-        return " ".join([
+        return []
+    scored = []
+    for r in rows:
+        blob = " ".join([
             str(r.get("name") or ""),
             str(r.get("description") or ""),
             str(r.get("highlight") or ""),
             str(r.get("tambon") or ""),
             str(r.get("category") or ""),
         ]).lower()
-    scored = []
-    for r in rows:
-        blob = row_text(r)
-        score = max(fuzz.partial_ratio(t.lower(), blob) for t in terms if t.strip()) if terms else 0
+        score = fuzz.partial_ratio(query_text.lower(), blob)
         scored.append((score, r))
     scored.sort(key=lambda x: x[0], reverse=True)
-    filtered = [r for s, r in scored if s >= threshold]
-    return filtered[:top_k] if filtered else [r for _, r in scored[:top_k]]
+    return [r for s, r in scored if s >= threshold][:top_k]
 
-# ---------- Intent (ใช้ history เพื่อความต่อเนื่อง) ----------
+# -------------------------------
+# วิเคราะห์ความหมายประโยค (Prompt Intelligence)
+# -------------------------------
 def _understand(user_input: str, history_text: str) -> dict:
+    """
+    ใช้ Gemini วิเคราะห์ความหมายของประโยคโดยตรง
+    เพื่อให้เข้าใจว่า ผู้ใช้ 'อยากหาอะไร' โดยไม่ต้องใช้ keyword mapping
+    """
     sys = (
-        "คุณคือผู้ช่วยท้องถิ่นอำเภอปะทิว พูดธรรมชาติ สุภาพแบบเพื่อน "
-        "ถ้าผู้ใช้ขอหาสถานที่ในปะทิว → want_search=true; "
-        "ถ้าคุยทั่วไป → want_search=false. "
-        "ใช้บริบทก่อนหน้าเพื่อเข้าใจความต่อเนื่องของบทสนทนา"
+        "คุณคือผู้ช่วยท้องถิ่นของอำเภอปะทิว จังหวัดชุมพร "
+        "หน้าที่ของคุณคือวิเคราะห์สิ่งที่ผู้ใช้พูด แล้วบอกว่าผู้ใช้ต้องการค้นหาสถานที่หรือไม่ "
+        "ถ้าต้องการ ให้ระบุประเภทสถานที่ (category) และตำบล (ถ้ามี) "
+        "หากผู้ใช้คุยเรื่องทั่วไป ไม่ได้พูดถึงสถานที่ ให้ตั้ง want_search=false "
+        "คุณตอบเฉพาะ JSON เท่านั้น ห้ามพูดเกิน"
     )
+
+    examples = """
+    ตัวอย่าง:
+    ผู้ใช้: หิวข้าวจังเลย
+    {"want_search": true, "category": "ร้านอาหาร", "tambon": null, "keywords": "อาหาร, ของกิน"}
+    ผู้ใช้: อยากไปทะเล
+    {"want_search": true, "category": "สถานที่ท่องเที่ยว", "tambon": null, "keywords": "ทะเล, ชายหาด"}
+    ผู้ใช้: มีคาเฟ่แถวชุมโคไหม
+    {"want_search": true, "category": "คาเฟ่", "tambon": "ชุมโค", "keywords": "กาแฟ, คาเฟ่"}
+    ผู้ใช้: อยากไหว้พระ
+    {"want_search": true, "category": "วัด", "tambon": null, "keywords": "วัด, ศาสนสถาน"}
+    ผู้ใช้: ไม่มีอะไร แค่คุยเล่น
+    {"want_search": false, "category": null, "tambon": null, "keywords": null}
+    """
+
     prompt = f"""{sys}
 
 บริบทก่อนหน้า:
 {history_text or "(ไม่มีประวัติ)"}
 
-ตอบเป็น JSON:
-{{
-  "want_search": true|false,
-  "category": null | "ประเภทสถานที่",
-  "tambon": null | "ชื่อตำบลในปะทิว",
-  "keywords": null | "คีย์เวิร์ดเพิ่ม",
-  "tone_hint": "โทนการตอบ"
-}}
+{examples}
 
 ผู้ใช้: "{user_input}"
+ตอบเป็น JSON เท่านั้น:
 """
+
     try:
         res = model.generate_content(prompt)
         data = _safe_json(res.text)
@@ -152,18 +112,21 @@ def _understand(user_input: str, history_text: str) -> dict:
             "category": data.get("category"),
             "tambon": data.get("tambon"),
             "keywords": data.get("keywords"),
-            "tone_hint": data.get("tone_hint") or "",
         }
     except Exception:
-        return {"want_search": False, "category": None, "tambon": None, "keywords": None, "tone_hint": ""}
+        return {"want_search": False, "category": None, "tambon": None, "keywords": None}
 
-def _reply_chitchat(user_input: str, tone_hint: str, history_text: str) -> str:
+# -------------------------------
+# ตอบคุยเล่น (โทนธรรมชาติ)
+# -------------------------------
+def _reply_chitchat(user_input: str, history_text: str) -> str:
     prompt = (
-        "บทบาท: เพื่อนผู้ช่วยท้องถิ่นปะทิว คุยสั้น เป็นกันเอง ไม่ยัดเยียดกลับไปหาสถานที่\n"
+        "คุณคือเพื่อนผู้ช่วยท้องถิ่นของอำเภอปะทิว "
+        "พูดคุยเป็นธรรมชาติ สุภาพแต่กันเอง "
+        "อย่าเปลี่ยนเรื่องไปพูดถึงสถานที่ถ้าผู้ใช้ไม่ได้ถาม\n\n"
         f"บริบทก่อนหน้า:\n{history_text or '(ไม่มีประวัติ)'}\n\n"
-        f"โทนที่ควรได้: {tone_hint}\n"
         f"ผู้ใช้: {user_input}\n"
-        "ตอบ:"
+        "ตอบสั้น ๆ แบบอบอุ่น:"
     )
     try:
         res = model.generate_content(prompt)
@@ -171,25 +134,32 @@ def _reply_chitchat(user_input: str, tone_hint: str, history_text: str) -> str:
     except Exception:
         return "ครับผม"
 
-# ---------- ฟังก์ชันหลัก ----------
+# -------------------------------
+# ฟังก์ชันหลักให้ app.py เรียกใช้
+# -------------------------------
 def get_answer(
     user_input: str,
     user_lat: Optional[float] = None,
     user_lng: Optional[float] = None,
-    history: Optional[List[Dict]] = None,   # ใช้บทสนทนาเก่า
+    history: Optional[List[Dict]] = None,
 ) -> Tuple[str, List[Dict]]:
+    """
+    คืนผลลัพธ์ (ข้อความตอบ, รายการสถานที่)
+    - ถ้าผู้ใช้คุยทั่วไป → คุยตอบ
+    - ถ้าผู้ใช้พูดถึงสถานที่ → แนะนำสถานที่ในอำเภอปะทิว
+    """
     history_text = _history_to_text(history, max_turns=8)
     u = _understand(user_input, history_text)
 
+    # ถ้าไม่ใช่คำถามเกี่ยวกับสถานที่ → คุยตามน้ำ
     if not u.get("want_search"):
-        return (_reply_chitchat(user_input, u.get("tone_hint", ""), history_text), [])
+        return (_reply_chitchat(user_input, history_text), [])
 
     category = u.get("category")
-    tambon_now = _tambon_if_in_text(user_input, u.get("tambon"))
-    tambon_hist = _infer_tambon_from_history(history_text)
-    tambon = tambon_now or tambon_hist
-    keywords_any = _expand_keywords_any(user_input, u.get("keywords"))
+    tambon = u.get("tambon")
+    keywords_any = [kw.strip() for kw in (u.get("keywords") or "").split(",") if kw.strip()]
 
+    # ------------------ ค้นหาสถานที่ ------------------
     if user_lat is not None and user_lng is not None:
         rows = search_places_nearby(
             user_lat, user_lng,
@@ -199,11 +169,16 @@ def get_answer(
     else:
         rows = search_places(category=category, tambon=tambon, keywords_any=keywords_any, limit=30)
 
-    rows = _fuzzy_filter(rows, user_input, extra_terms=keywords_any, threshold=55, top_k=12)
+    rows = _fuzzy_filter(rows, user_input, threshold=55, top_k=12)
 
+    # ------------------ ไม่มีผลลัพธ์ ------------------
     if not rows:
-        return ("ขอโทษนะครับ เหมือนผมอาจจะเข้าใจคลาดเคลื่อนนิดหน่อย ลองช่วยถามใหม่อีกทีได้ไหมครับ", [])
+        return (
+            "ขอโทษนะครับ เหมือนผมอาจจะเข้าใจคลาดเคลื่อนไปนิดหน่อย ลองช่วยถามใหม่อีกทีได้ไหมครับ",
+            []
+        )
 
+    # ------------------ มีผลลัพธ์ ------------------
     intro = "ตอนนี้มีสถานที่ไหนที่คุณต้องการบ้างมั้ยครับ บอกผมมาได้เลยนะ เผื่อผมมีสถานที่ใกล้เคียงกับความต้องการของคุณ"
     outro = "ถ้ายังไม่ตรงใจ บอกเพิ่มได้นะครับ เดี๋ยวผมช่วยหาต่อให้เองครับ"
     return (f"{intro}\n\n{outro}", rows)
