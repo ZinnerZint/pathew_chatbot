@@ -191,31 +191,132 @@ def _reply_chitchat(user_input: str, history_text: str) -> str:
     except Exception:
         return "ครับผม"
 
+# ====== โหมด "ถามต่อเกี่ยวกับสถานที่" (ข้อความล้วนจากข้อมูลที่มีอยู่) ======
+FOLLOWUP_PATTERNS = [
+    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เด่น|แนะนำ|signature|ซิกเนเจอร์)",
+    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เปิดกี่โมง|ปิดกี่โมง|เวลา|ทำการ)",
+    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(ราคา|ค่าเข้า|ค่าธรรมเนียม|งบ)",
+    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(อยู่ไหน|พิกัด|แผนที่|ไปยังไง|เส้นทาง|ที่อยู่)",
+    r"(เด่น|แนะนำ|signature|ซิกเนเจอร์)$",
+    r"(เปิดกี่โมง|ปิดกี่โมง|เวลา|ทำการ)$",
+    r"(ราคา|ค่าเข้า|ค่าธรรมเนียม|งบ)$",
+    r"(อยู่ไหน|พิกัด|แผนที่|ไปยังไง|เส้นทาง|ที่อยู่)$",
+]
+
+def _looks_like_followup(q: str) -> bool:
+    q = q.strip().lower()
+    return any(re.search(p, q) for p in FOLLOWUP_PATTERNS)
+
+def _extract_place_name(q: str) -> str | None:
+    s = q
+    for w in ["เด่นอะไร","เด่นที่อะไร","เด่น","แนะนำ","signature","ซิกเนเจอร์",
+              "เปิดกี่โมง","ปิดกี่โมง","เวลา","ทำการ",
+              "ราคา","ค่าเข้า","ค่าธรรมเนียม","งบ",
+              "อยู่ไหน","พิกัด","แผนที่","ไปยังไง","เส้นทาง","ที่อยู่",
+              "ร้านนี้","ที่นี่","ตรงนี้","สถานที่นี้"]:
+        s = s.replace(w, "")
+    s = re.sub(r"\s{2,}", " ", s).strip()
+    return s if len(s) >= 2 else None
+
+def _pick_focus_place(focus_place_id, last_results, maybe_name=None):
+    if focus_place_id and last_results:
+        for p in last_results:
+            if p.get("id") == focus_place_id:
+                return p
+    if last_results and len(last_results) == 1:
+        return last_results[0]
+    if maybe_name:
+        found = search_places(keywords_any=[maybe_name], limit=5)
+        if not found:
+            return None
+        best, score = None, -1
+        for p in found:
+            s = fuzz.partial_ratio(maybe_name.lower(), (p.get("name") or "").lower())
+            if s > score:
+                best, score = p, s
+        return best
+    return None
+
+def _format_place_answer_from_existing_fields(place: dict, user_q: str) -> str:
+    name = place.get("name") or "สถานที่นี้"
+    highlight = (place.get("highlight") or "").strip()
+    desc = (place.get("description") or "").strip()
+    category = (place.get("category") or "").strip()
+    tambon = (place.get("tambon") or "").strip()
+    lat, lng = place.get("latitude"), place.get("longitude")
+
+    def has(x): return bool(x and str(x).lower() not in ["none","null","nan"])
+
+    q = user_q.lower()
+    parts = []
+
+    if any(k in q for k in ["เด่น","signature","ซิกเนเจอร์","แนะนำ"]):
+        if has(highlight):
+            parts.append(f"**จุดเด่นของ {name}:** {highlight}")
+        elif has(desc):
+            parts.append(f"{name} จุดเด่น/ภาพรวม: {desc[:220]}{'...' if len(desc)>220 else ''}")
+        else:
+            parts.append(f"{name} ยังไม่มีข้อมูลจุดเด่นในฐานข้อมูลครับ")
+
+    if any(k in q for k in ["เปิดกี่โมง","ปิดกี่โมง","เวลา","ทำการ"]):
+        parts.append("ตอนนี้ยังไม่ได้บันทึกเวลาเปิด-ปิดไว้ในฐานข้อมูลครับ")
+
+    if any(k in q for k in ["ราคา","ค่าเข้า","ค่าธรรมเนียม","งบ"]):
+        parts.append("ตอนนี้ยังไม่ได้บันทึกราคา/ค่าเข้าของสถานที่นี้ไว้ครับ")
+
+    if any(k in q for k in ["อยู่ไหน","พิกัด","แผนที่","ไปยังไง","เส้นทาง","ที่อยู่"]):
+        line = []
+        if has(category): line.append(f"ประเภท: {category}")
+        if has(tambon):   line.append(f"ตำบล: {tambon}")
+        if lat and lng:   line.append(f"พิกัด: {lat:.6f},{lng:.6f}")
+        parts.append(" / ".join(line) if line else "ยังไม่มีที่อยู่/พิกัดในฐานข้อมูลครับ")
+
+    if not parts:
+        summary = []
+        if has(highlight): summary.append(f"จุดเด่น: {highlight}")
+        elif has(desc):    summary.append(desc[:220] + ("..." if len(desc)>220 else ""))
+        if has(category):  summary.append(f"ประเภท: {category}")
+        if has(tambon):    summary.append(f"ตำบล: {tambon}")
+        if lat and lng:    summary.append(f"พิกัด: {lat:.6f},{lng:.6f}")
+        parts.append(" / ".join(summary) or f"{name} ยังไม่มีรายละเอียดมากนักครับ")
+
+    return "\n".join(parts)
+
 # ===== ฟังก์ชันหลัก =====
 def get_answer(
     user_input: str,
     user_lat: Optional[float] = None,
     user_lng: Optional[float] = None,
     history: Optional[List[Dict]] = None,
+    focus_place_id: Optional[int] = None,
+    last_results: Optional[List[Dict]] = None,
 ) -> Tuple[str, List[Dict]]:
     history_text = _history_to_text(history, max_turns=8)
+    last_results = last_results or []
+
+    # —— โหมด “ถามต่อเกี่ยวกับสถานที่” → ตอบข้อความล้วน ไม่คืนการ์ด ——
+    if _looks_like_followup(user_input):
+        maybe_name = _extract_place_name(user_input)
+        place = _pick_focus_place(focus_place_id, last_results, maybe_name)
+        if place:
+            return _format_place_answer_from_existing_fields(place, user_input), []
+        return ("ขอชื่อสถานที่ที่คุณหมายถึงหน่อยครับ เช่น “ตลาดสดปะทิว เด่นอะไร” "
+                "หรือกดปุ่ม “คุยต่อเกี่ยวกับที่นี่” จากการ์ดสถานที่ก่อนหน้าได้เลยครับ"), []
+
+    # —— เข้าใจเจตนา (ค้นหาหรือคุยเล่น) ——
     u = _understand(user_input, history_text)
 
-    # ---- บังคับตีความหมวดกิน/ดื่มถ้า LLM งง (กันเคส "อยากกินชาเย็น/ข้าว" หลุด) ----
+    # กัน LLM งง → เดาในเครื่องสำหรับเคสกิน/ดื่ม/หมวดยอดฮิต
     if not u.get("want_search"):
         local_cat = _local_guess_category(user_input)
         txt = user_input.lower()
         if any(w in txt for w in ["ชาเย็น", "ชา", "กาแฟ", "นม", "ของหวาน", "น้ำ", "ข้าว", "อาหาร", "หิว", "กิน"]):
             u["want_search"] = True
-            if any(w in txt for w in ["ชา", "กาแฟ", "คาเฟ่", "นม", "ของหวาน"]):
-                u["category"] = "คาเฟ่"
-            else:
-                u["category"] = "ร้านอาหาร"
+            u["category"] = "คาเฟ่" if any(w in txt for w in ["ชา", "กาแฟ", "คาเฟ่", "นม", "ของหวาน"]) else "ร้านอาหาร"
         elif local_cat:
             u["want_search"] = True
             u["category"] = u.get("category") or local_cat
 
-    # ถ้ายังไม่ใช่การค้นหา → คุยตามธรรมชาติ
     if not u.get("want_search"):
         return (_reply_chitchat(user_input, history_text), [])
 
@@ -223,7 +324,7 @@ def get_answer(
     prefer_tambon = u.get("tambon")
     keywords = _extract_keywords(user_input, u.get("keywords"))
 
-    # 1) ค้นรอบแรก (ใช้คีย์เวิร์ด + tambon ถ้ามี)
+    # —— ค้นรอบแรก (ใกล้ฉันถ้ามีพิกัด) ——
     if user_lat is not None and user_lng is not None:
         base = search_places_nearby(
             user_lat, user_lng,
@@ -236,12 +337,12 @@ def get_answer(
 
     ranked = _rank(base, user_input, prefer_category, prefer_tambon, top_k=12)
 
-    # ✨ กรองให้ตรงหมวดตามเจตนา (กันเคสหิวข้าวแต่ไปโผล่ชายหาด/ซ่อมรถ)
+    # กรองให้ตรงหมวดตามเจตนา
     filtered = [r for r in ranked if _is_allowed_for_intent(prefer_category, r)]
     if filtered:
         ranked = filtered
 
-    # 2) ถ้ายังน้อย → ผ่อนเงื่อนไข (ไม่ใช้คีย์เวิร์ด/ขยายรัศมี)
+    # —— ผ่อนเงื่อนไขถ้าน้อย ——
     if not ranked:
         if user_lat is not None and user_lng is not None:
             base2 = search_places_nearby(
@@ -253,8 +354,6 @@ def get_answer(
             base2 = search_places(category=None, tambon=prefer_tambon,
                                   keywords_any=None, limit=60)
         ranked = _rank(base2, user_input, prefer_category, prefer_tambon, top_k=12)
-
-        # กรองหมวดอีกครั้ง (ถ้าพอมีให้ใช้)
         filtered2 = [r for r in ranked if _is_allowed_for_intent(prefer_category, r)]
         if filtered2:
             ranked = filtered2

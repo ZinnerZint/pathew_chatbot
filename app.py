@@ -27,6 +27,15 @@ if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "content": "สวัสดีครับ! อยากหาสถานที่ในอำเภอปะทิวบอกผมได้เลย"}
     ]
+if "user_lat" not in st.session_state:
+    st.session_state.user_lat = None
+if "user_lng" not in st.session_state:
+    st.session_state.user_lng = None
+# โหมดคุยต่อ: จำ “ร้าน/สถานที่โฟกัส” และ “ผลลัพธ์รอบล่าสุด”
+if "focus_place_id" not in st.session_state:
+    st.session_state.focus_place_id = None
+if "last_results" not in st.session_state:
+    st.session_state.last_results = []
 
 # ---------- ขอพิกัดผู้ใช้ครั้งแรก (ถ้าอนุญาต) ----------
 user_lat = st.session_state.get("user_lat")
@@ -59,25 +68,29 @@ if user_input:
     with st.chat_message("user", avatar=avatar_user):
         st.markdown(user_input)
 
-    # เรียกบอท — ส่ง history ถ้าฟังก์ชันรองรับ (กันพังหากไป import เวอร์ชันเก่า)
+    # เรียกบอท — ส่ง history + โหมดโฟกัส/ผลลัพธ์ล่าสุด
     try:
         reply_text, places = get_answer(
             user_input,
             user_lat=st.session_state.get("user_lat"),
             user_lng=st.session_state.get("user_lng"),
-            history=st.session_state.messages[-8:],   # จำบริบท 8 ข้อความล่าสุด
+            history=st.session_state.messages[-8:],
+            focus_place_id=st.session_state.get("focus_place_id"),
+            last_results=st.session_state.get("last_results", []),
         )
     except TypeError:
+        # เผื่อกรณีใช้ chatbot.py เวอร์ชันเก่า
         reply_text, places = get_answer(
             user_input,
             user_lat=st.session_state.get("user_lat"),
             user_lng=st.session_state.get("user_lng"),
         )
 
-    # แสดงคำตอบ + การ์ดสถานที่
+    # แสดงคำตอบ (เสมอ)
     with st.chat_message("assistant", avatar=avatar_bot):
         st.markdown(reply_text)
 
+        # ถ้ามี places = โหมด "ค้นหา" → แสดงการ์ด; ถ้าไม่มี = โหมด "คุยต่อ" → ไม่แสดงการ์ดซ้ำ
         if places:
             for p in places:
                 name = p.get("name", "-")
@@ -91,7 +104,7 @@ if user_input:
                 with st.container(border=True):
                     cols = st.columns([1, 2])
 
-                    # ---- ซ้าย: รูป (รองรับแกลเลอรีหลายรูป) ----
+                    # ---- ซ้าย: รูป (รองรับแกลเลอรีหลายรูป + fallback) ----
                     with cols[0]:
                         shown = False
                         images_raw = p.get("image_urls") or "[]"
@@ -113,12 +126,10 @@ if user_input:
                                         with tcol:
                                             st.image(u, use_container_width=True)
 
-                        # fallback: image_url เดี่ยว
                         if (not shown) and isinstance(p.get("image_url"), str) and p["image_url"].startswith("http"):
                             st.image(p["image_url"], use_container_width=True)
                             shown = True
 
-                        # fallback: Static Maps ถ้ามีพิกัด
                         if (not shown) and lat and lng and MAPS_API_KEY:
                             static_map = (
                                 "https://maps.googleapis.com/maps/api/staticmap"
@@ -131,7 +142,7 @@ if user_input:
                         if not shown:
                             st.markdown("ไม่มีรูป")
 
-                    # ---- ขวา: รายละเอียด ----
+                    # ---- ขวา: รายละเอียด + ปุ่มคุยต่อ ----
                     with cols[1]:
                         st.markdown(f"**{name}**")
                         st.markdown(desc or "—")
@@ -141,5 +152,17 @@ if user_input:
                         if map_link:
                             st.markdown(f"[เปิดแผนที่]({map_link})")
 
+                        # ปุ่มตั้งโฟกัส เพื่อให้ผู้ใช้ถามต่อได้ (เช่น "ที่นี่เด่นอะไร")
+                        if "id" in p and st.button("คุยต่อเกี่ยวกับที่นี่", key=f"focus_{p['id']}"):
+                            st.session_state["focus_place_id"] = p["id"]
+                            st.experimental_rerun()
+
     # เก็บข้อความบอทลงประวัติ (เก็บเฉพาะข้อความ)
     st.session_state.messages.append({"role": "assistant", "content": reply_text})
+
+    # เก็บผลลัพธ์ล่าสุดไว้ใช้เป็นบริบทถามต่อ
+    if places:
+        st.session_state["last_results"] = places
+        # ถ้ามีผลลัพธ์เดียว → โฟกัสอัตโนมัติ
+        if len(places) == 1 and places[0].get("id"):
+            st.session_state["focus_place_id"] = places[0]["id"]
