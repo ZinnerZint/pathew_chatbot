@@ -147,6 +147,7 @@ if user_input:
             last_results=st.session_state.get("last_results", []),
         )
     except TypeError:
+        # กันกรณีใช้ chatbot.py รุ่นเก่า
         reply_text, places = get_answer(
             user_input,
             user_lat=st.session_state.get("user_lat"),
@@ -156,7 +157,7 @@ if user_input:
     with st.chat_message("assistant", avatar=avatar_bot):
         st.markdown(reply_text)
 
-        # แสดงการ์ดเฉพาะตอนค้นหา (ถ้าโหมดถามต่อ/เลือก → places = [])
+        # โหมดค้นหาเท่านั้นที่จะแสดงการ์ด; โหมดถามต่อ/เลือกจะส่ง places=[]
         if places:
             for p in places:
                 _render_place_card(p)

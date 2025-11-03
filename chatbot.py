@@ -1,7 +1,8 @@
 # chatbot.py — full version with:
-# 1) text-only follow-up on a focused place (no card re-render)
-# 2) choose/recommend from last_results without re-query
-# 3) normal retrieval (nearby/standard) with fuzzy ranking
+# 1) choose/recommend from last_results (no re-query)
+# 2) text-only follow-up on focused place (e.g., "เด่นอะไร")
+# 3) map/where requests return a single place card (places=[place])
+# 4) normal retrieval (nearby/standard) with fuzzy ranking
 # No DB schema change required.
 
 import json
@@ -194,7 +195,7 @@ def _reply_chitchat(user_input: str, history_text: str) -> str:
     except Exception:
         return "ครับผม"
 
-# ---------- Follow-up Mode (text-only) ----------
+# ---------- Follow-up / Map / Choose detection ----------
 FOLLOWUP_PATTERNS = [
     r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เด่น|แนะนำ|signature|ซิกเนเจอร์)",
     r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เปิดกี่โมง|ปิดกี่โมง|เวลา|ทำการ)",
@@ -209,6 +210,16 @@ FOLLOWUP_PATTERNS = [
 def _looks_like_followup(q: str) -> bool:
     q = q.strip().lower()
     return any(re.search(p, q) for p in FOLLOWUP_PATTERNS)
+
+def _looks_like_map_request(q: str) -> bool:
+    q = (q or "").strip().lower()
+    keywords = ["แผนที่", "พิกัด", "ไปยังไง", "เส้นทาง", "ที่อยู่", "ไหนอะ", "ตรงไหน", "ขอแผนที่", "เปิดแผนที่"]
+    return any(k in q for k in keywords)
+
+def _looks_like_choose_request(q: str) -> bool:
+    q = q.strip().lower()
+    phrases = ["เลือก", "ช่วยเลือก", "แนะนำ", "ร้านไหนดี", "ไหนดี", "เลือกสักร้าน", "เลือกให้หน่อย"]
+    return any(p in q for p in phrases)
 
 def _extract_place_name(q: str) -> str | None:
     s = q
@@ -229,7 +240,6 @@ def _pick_focus_place(focus_place_id, last_results, maybe_name=None):
     if last_results and len(last_results) == 1:
         return last_results[0]
     if maybe_name:
-        # ใช้ keywords_any ตาม db.py เวอร์ชันทั่วไป
         found = search_places(keywords_any=[maybe_name], limit=5)
         if not found:
             return None
@@ -286,20 +296,11 @@ def _format_place_answer_from_existing_fields(place: dict, user_q: str) -> str:
 
     return "\n".join(parts)
 
-# ---------- Choose / Recommend from last_results ----------
-def _looks_like_choose_request(q: str) -> bool:
-    q = q.strip().lower()
-    phrases = ["เลือก", "ช่วยเลือก", "แนะนำ", "ร้านไหนดี", "ไหนดี", "เลือกสักร้าน", "เลือกให้หน่อย"]
-    return any(p in q for p in phrases)
-
 def _score_for_choice(p: Dict, prefer_category: Optional[str]) -> int:
     s = 0
-    # ความครบถ้วนของข้อมูล
     if p.get("highlight"): s += min(60, len(str(p["highlight"])))
     if p.get("description"): s += min(60, len(str(p["description"])))
-    # มีรูป
     if p.get("image_url"): s += 30
-    # ตรงหมวด
     if prefer_category and _is_allowed_for_intent(prefer_category, p):
         s += 25
     return s
@@ -316,11 +317,11 @@ def get_answer(
     history_text = _history_to_text(history, max_turns=8)
     last_results = last_results or []
 
-    # 0) ถ้าผู้ใช้ให้ "เลือก/แนะนำ" → เลือกจากผลล่าสุด (ไม่ค้นใหม่)
+    # 0) choose/แนะนำจากผลล่าสุด (ไม่ค้นใหม่)
     if _looks_like_choose_request(user_input):
         if not last_results:
             return ("ตอนนี้ยังไม่มีรายการให้เลือกครับ ลองพิมพ์หาสถานที่ก่อน เช่น “คาเฟ่แถวชุมโค”", [])
-        prefer_cat = _local_guess_category(user_input)  # ถ้าพูดว่า เลือกคาเฟ่/ร้านข้าว…
+        prefer_cat = _local_guess_category(user_input)
         best = sorted(last_results, key=lambda p: _score_for_choice(p, prefer_cat), reverse=True)[0]
         name = best.get("name", "สถานที่นี้")
         hi = best.get("highlight") or ""
@@ -334,19 +335,23 @@ def get_answer(
         if meta: reply += f" ({' | '.join(meta)})"
         return reply.strip(), []
 
-    # 1) โหมด “ถามต่อเกี่ยวกับสถานที่” → ตอบข้อความล้วน ไม่คืนการ์ด
-    if _looks_like_followup(user_input):
+    # 1) โหมดถามต่อ/ขอแผนที่
+    if _looks_like_followup(user_input) or _looks_like_map_request(user_input):
         maybe_name = _extract_place_name(user_input)
         place = _pick_focus_place(focus_place_id, last_results, maybe_name)
         if place:
+            # ถ้าเป็นคำขอแผนที่/พิกัด → คืนการ์ดสถานที่ (places=[place])
+            if _looks_like_map_request(user_input):
+                return "นี่ครับ แสดงรายละเอียดและปุ่มเปิดแผนที่ให้แล้ว", [place]
+            # คำถามต่ออื่น ๆ → ตอบข้อความล้วน
             return _format_place_answer_from_existing_fields(place, user_input), []
-        return ("ขอชื่อสถานที่ที่คุณหมายถึงหน่อยครับ เช่น “ตลาดเลริวเซ็น เด่นอะไร” "
-                "หรือกดปุ่ม “คุยต่อเกี่ยวกับที่นี่” จากการ์ดสถานที่ก่อนหน้าได้เลยครับ"), []
+        return ("ขอชื่อสถานที่ที่คุณหมายถึงหน่อยครับ เช่น “ตลาดเลริวเซ็น อยู่ตรงไหน” "
+                "หรือกดปุ่ม “คุยต่อเกี่ยวกับที่นี่” จากการ์ดสถานที่ก่อนหน้าได้ครับ"), []
 
-    # 2) เข้าใจเจตนา (ค้นหาหรือคุยเล่น)
+    # 2) เข้าใจเจตนา
     u = _understand(user_input, history_text)
 
-    # guardrail: เดาในเครื่องสำหรับเคสยอดฮิต (กิน/ดื่ม/ฯลฯ)
+    # guardrail: เดาในเครื่องสำหรับเคสยอดฮิต
     if not u.get("want_search"):
         local_cat = _local_guess_category(user_input)
         txt = user_input.lower()
