@@ -1,3 +1,9 @@
+# app.py — wired for:
+# - text-only follow-up
+# - choose/recommend from last_results
+# - normal search rendering
+# No DB schema change required.
+
 import json
 from urllib.parse import quote
 
@@ -5,7 +11,6 @@ import streamlit as st
 from chatbot import get_answer
 from config import MAPS_API_KEY
 
-# ดึงพิกัดจากเบราว์เซอร์ (ถ้ามีไลบรารี) — ไม่มีก็ไม่พัง
 try:
     from streamlit_javascript import st_javascript
 except Exception:
@@ -14,9 +19,9 @@ except Exception:
 # ---------- Page setup ----------
 st.set_page_config(page_title="Pathew Chatbot", page_icon="🌴", layout="centered")
 st.markdown("<h1 style='margin-bottom:0'>🌴 AI Chatbot แนะนำสถานที่ในอำเภอปะทิว</h1>", unsafe_allow_html=True)
-st.caption("บอกความต้องการคุณมาได้เลย เช่น: ตลาด, ยิม/ฟิตเนส, คาเฟ่, ปั๊มน้ำมัน, วัด, จุดชมวิว")
+st.caption("พิมพ์ความต้องการ เช่น: ตลาด, คาเฟ่, ร้านซ่อมรถ, ปั๊มน้ำมัน, วัด, หาด ฯลฯ")
 
-# ---------- Colored avatars ----------
+# ---------- Avatars ----------
 svg_user = """<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='20' cy='20' r='18' fill='#3B82F6'/></svg>"""
 svg_bot  = """<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='20' cy='20' r='18' fill='#F59E0B'/></svg>"""
 avatar_user = f"data:image/svg+xml;utf8,{quote(svg_user)}"
@@ -31,13 +36,12 @@ if "user_lat" not in st.session_state:
     st.session_state.user_lat = None
 if "user_lng" not in st.session_state:
     st.session_state.user_lng = None
-# โหมดคุยต่อ: จำ “ร้าน/สถานที่โฟกัส” และ “ผลลัพธ์รอบล่าสุด”
 if "focus_place_id" not in st.session_state:
     st.session_state.focus_place_id = None
 if "last_results" not in st.session_state:
     st.session_state.last_results = []
 
-# ---------- ขอพิกัดผู้ใช้ครั้งแรก (ถ้าอนุญาต) ----------
+# ---------- Geolocation (optional) ----------
 user_lat = st.session_state.get("user_lat")
 user_lng = st.session_state.get("user_lng")
 if st_javascript and (user_lat is None or user_lng is None):
@@ -51,7 +55,7 @@ if st_javascript and (user_lat is None or user_lng is None):
                 st.session_state["user_lng"] = float(lng)
                 user_lat, user_lng = float(lat), float(lng)
     except Exception:
-        pass  # ผู้ใช้ไม่อนุญาต/เบราว์เซอร์ไม่รองรับ ก็ข้ามไป
+        pass
 
 # ---------- Render history ----------
 for msg in st.session_state.messages:
@@ -62,13 +66,77 @@ for msg in st.session_state.messages:
 # ---------- Chat input ----------
 user_input = st.chat_input("พิมพ์คุยอะไรก็ได้ หรือบอกประเภท/ชื่อสถานที่ในปะทิว…")
 
+def _render_place_card(p: dict):
+    name = p.get("name", "-")
+    desc = (p.get("description") or "").strip()
+    hi = (p.get("highlight") or "").strip()
+    tambon = p.get("tambon", "-")
+    category = p.get("category", "-")
+    lat, lng = p.get("latitude"), p.get("longitude")
+    map_link = f"https://www.google.com/maps?q={lat},{lng}" if lat and lng else None
+
+    with st.container(border=True):
+        cols = st.columns([1, 2])
+
+        # Left: image / gallery / static map fallback
+        with cols[0]:
+            shown = False
+            images_raw = p.get("image_urls") or "[]"
+            try:
+                images = json.loads(images_raw) if isinstance(images_raw, str) else images_raw
+            except Exception:
+                images = []
+            urls = [u for u in images if isinstance(u, str) and u.startswith("http")]
+
+            if urls:
+                st.image(urls[0], use_container_width=True)
+                shown = True
+                thumbs = urls[1:]
+                if thumbs:
+                    for i in range(0, len(thumbs), 4):
+                        row = thumbs[i:i+4]
+                        tcols = st.columns(len(row))
+                        for tcol, u in zip(tcols, row):
+                            with tcol:
+                                st.image(u, use_container_width=True)
+
+            if (not shown) and isinstance(p.get("image_url"), str) and p["image_url"].startswith("http"):
+                st.image(p["image_url"], use_container_width=True)
+                shown = True
+
+            if (not shown) and lat and lng and MAPS_API_KEY:
+                static_map = (
+                    "https://maps.googleapis.com/maps/api/staticmap"
+                    f"?center={lat},{lng}&zoom=15&size=640x400&maptype=roadmap"
+                    f"&markers=color:red%7C{lat},{lng}&key={MAPS_API_KEY}"
+                )
+                st.image(static_map, use_container_width=True)
+                shown = True
+
+            if not shown:
+                st.markdown("ไม่มีรูป")
+
+        # Right: details + focus button
+        with cols[1]:
+            st.markdown(f"**{name}**")
+            st.markdown(desc or "—")
+            if hi:
+                st.markdown(f"**จุดเด่น:** {hi}")
+            st.markdown(f"**ตำบล:** {tambon}  |  **ประเภท:** {category}")
+            if map_link:
+                st.markdown(f"[เปิดแผนที่]({map_link})")
+
+            if "id" in p and st.button("คุยต่อเกี่ยวกับที่นี่", key=f"focus_{p['id']}"):
+                st.session_state["focus_place_id"] = p["id"]
+                st.experimental_rerun()
+
 if user_input:
-    # แสดง/เก็บข้อความผู้ใช้
+    # show user bubble
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user", avatar=avatar_user):
         st.markdown(user_input)
 
-    # เรียกบอท — ส่ง history + โหมดโฟกัส/ผลลัพธ์ล่าสุด
+    # ask bot
     try:
         reply_text, places = get_answer(
             user_input,
@@ -79,90 +147,25 @@ if user_input:
             last_results=st.session_state.get("last_results", []),
         )
     except TypeError:
-        # เผื่อกรณีใช้ chatbot.py เวอร์ชันเก่า
         reply_text, places = get_answer(
             user_input,
             user_lat=st.session_state.get("user_lat"),
             user_lng=st.session_state.get("user_lng"),
         )
 
-    # แสดงคำตอบ (เสมอ)
     with st.chat_message("assistant", avatar=avatar_bot):
         st.markdown(reply_text)
 
-        # ถ้ามี places = โหมด "ค้นหา" → แสดงการ์ด; ถ้าไม่มี = โหมด "คุยต่อ" → ไม่แสดงการ์ดซ้ำ
+        # แสดงการ์ดเฉพาะตอนค้นหา (ถ้าโหมดถามต่อ/เลือก → places = [])
         if places:
             for p in places:
-                name = p.get("name", "-")
-                desc = (p.get("description") or "").strip()
-                hi = (p.get("highlight") or "").strip()
-                tambon = p.get("tambon", "-")
-                category = p.get("category", "-")
-                lat, lng = p.get("latitude"), p.get("longitude")
-                map_link = f"https://www.google.com/maps?q={lat},{lng}" if lat and lng else None
+                _render_place_card(p)
 
-                with st.container(border=True):
-                    cols = st.columns([1, 2])
-
-                    # ---- ซ้าย: รูป (รองรับแกลเลอรีหลายรูป + fallback) ----
-                    with cols[0]:
-                        shown = False
-                        images_raw = p.get("image_urls") or "[]"
-                        try:
-                            images = json.loads(images_raw) if isinstance(images_raw, str) else images_raw
-                        except Exception:
-                            images = []
-                        urls = [u for u in images if isinstance(u, str) and u.startswith("http")]
-
-                        if urls:
-                            st.image(urls[0], use_container_width=True)
-                            shown = True
-                            thumbs = urls[1:]
-                            if thumbs:
-                                for i in range(0, len(thumbs), 4):
-                                    row = thumbs[i:i+4]
-                                    tcols = st.columns(len(row))
-                                    for tcol, u in zip(tcols, row):
-                                        with tcol:
-                                            st.image(u, use_container_width=True)
-
-                        if (not shown) and isinstance(p.get("image_url"), str) and p["image_url"].startswith("http"):
-                            st.image(p["image_url"], use_container_width=True)
-                            shown = True
-
-                        if (not shown) and lat and lng and MAPS_API_KEY:
-                            static_map = (
-                                "https://maps.googleapis.com/maps/api/staticmap"
-                                f"?center={lat},{lng}&zoom=15&size=640x400&maptype=roadmap"
-                                f"&markers=color:red%7C{lat},{lng}&key={MAPS_API_KEY}"
-                            )
-                            st.image(static_map, use_container_width=True)
-                            shown = True
-
-                        if not shown:
-                            st.markdown("ไม่มีรูป")
-
-                    # ---- ขวา: รายละเอียด + ปุ่มคุยต่อ ----
-                    with cols[1]:
-                        st.markdown(f"**{name}**")
-                        st.markdown(desc or "—")
-                        if hi:
-                            st.markdown(f"**จุดเด่น:** {hi}")
-                        st.markdown(f"**ตำบล:** {tambon}  |  **ประเภท:** {category}")
-                        if map_link:
-                            st.markdown(f"[เปิดแผนที่]({map_link})")
-
-                        # ปุ่มตั้งโฟกัส เพื่อให้ผู้ใช้ถามต่อได้ (เช่น "ที่นี่เด่นอะไร")
-                        if "id" in p and st.button("คุยต่อเกี่ยวกับที่นี่", key=f"focus_{p['id']}"):
-                            st.session_state["focus_place_id"] = p["id"]
-                            st.experimental_rerun()
-
-    # เก็บข้อความบอทลงประวัติ (เก็บเฉพาะข้อความ)
+    # save assistant text to history
     st.session_state.messages.append({"role": "assistant", "content": reply_text})
 
-    # เก็บผลลัพธ์ล่าสุดไว้ใช้เป็นบริบทถามต่อ
+    # remember last results + focus auto when only one
     if places:
         st.session_state["last_results"] = places
-        # ถ้ามีผลลัพธ์เดียว → โฟกัสอัตโนมัติ
         if len(places) == 1 and places[0].get("id"):
             st.session_state["focus_place_id"] = places[0]["id"]

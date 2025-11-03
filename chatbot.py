@@ -1,12 +1,20 @@
+# chatbot.py — full version with:
+# 1) text-only follow-up on a focused place (no card re-render)
+# 2) choose/recommend from last_results without re-query
+# 3) normal retrieval (nearby/standard) with fuzzy ranking
+# No DB schema change required.
+
 import json
 import re
 from typing import List, Dict, Tuple, Optional
+
 import google.generativeai as genai
 from rapidfuzz import fuzz
+
 from config import GEMINI_API_KEY
 from db import search_places, search_places_nearby
 
-# ---------- ตั้งค่าโมเดล ----------
+# ---------- LLM config ----------
 genai.configure(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.0-flash-lite"
 model = genai.GenerativeModel(
@@ -19,9 +27,37 @@ model = genai.GenerativeModel(
     }
 )
 
-KNOWN_TAMBON = {"ชุมโค", "บางสน", "ดอนยาง", "ปากคลอง", "ช้างแรก", "ทะเลทรัพย์", "เขาไชยราช"}
+STOP_WORDS = {
+    "อยาก", "ช่วย", "หน่อย", "แถว", "ที่", "มี", "ไหม", "มั้ย", "ครับ", "ค่ะ",
+    "คับ", "จ้า", "นะ", "บ้าง", "ขอ", "หา", "ด้วย", "เอา", "หนึ่ง", "นึง", "แนะนำ",
+    "ตรง", "แถวไหน", "ขอหน่อย"
+}
 
-# ===== Helpers =====
+LOCAL_CATEGORY_HINTS = {
+    "ยิม/ฟิตเนส": {"ยิม", "ฟิตเนส", "ออกกำลัง", "เวท", "ฟิตเนต"},
+    "ร้านซ่อมรถ": {"อู่", "ซ่อมรถ", "ศูนย์", "ร้านยาง", "ปะยาง", "แบตเตอรี่", "แม็ก", "ช่วงล่าง"},
+    "ร้านอาหาร": {"กินข้าว", "ข้าว", "กับข้าว", "อาหาร", "หิว", "ก๋วยเตี๋ยว", "ตามสั่ง", "ซีฟู้ด"},
+    "คาเฟ่": {"คาเฟ่", "กาแฟ", "ชานม", "ชาเย็น", "ชา", "นั่งชิล", "เบเกอรี่"},
+    "ตลาด": {"ตลาด", "ตลาดสด", "ตลาดนัด"},
+    "วัด": {"ไหว้พระ", "วัด", "ทำบุญ"},
+    "ปั๊มน้ำมัน": {"ปั๊ม", "เติมน้ำมัน", "ปั๊มน้ำมัน", "ptt", "บางจาก", "เชลล์", "พีที"},
+    "ที่พัก": {"ที่พัก", "รีสอร์ท", "โฮมสเตย์", "โรงแรม", "เกสต์เฮาส์"},
+    "สถานที่ท่องเที่ยว": {"สถานที่ท่องเที่ยว", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "แลนด์มาร์ก", "ทะเล"},
+}
+
+ALLOWED_BY_INTENT = {
+    "ร้านอาหาร": ["ร้านอาหาร", "อาหาร", "ข้าว", "ซีฟู้ด", "ก๋วยเตี๋ยว", "ข้าวต้ม", "ตามสั่ง", "สตรีทฟู้ด", "ของกิน"],
+    "คาเฟ่": ["คาเฟ่", "กาแฟ", "เครื่องดื่ม", "ของหวาน", "ชา", "ชาเย็น", "เบเกอรี่", "คอฟฟี่"],
+    "ยิม/ฟิตเนส": ["ยิม", "ฟิตเนส", "ออกกำลังกาย", "เทรนนิ่ง", "ฟิตเนต"],
+    "ร้านซ่อมรถ": ["ซ่อมรถ", "อู่", "ศูนย์", "ยาง", "ปะยาง", "แบตเตอรี่", "ช่วงล่าง", "แม็ก"],
+    "ปั๊มน้ำมัน": ["ปั๊ม", "ปั๊มน้ำมัน", "ptt", "บางจาก", "เชลล์", "พีที"],
+    "ตลาด": ["ตลาด", "ตลาดสด", "ตลาดนัด"],
+    "วัด": ["วัด", "ไหว้พระ", "ศาสนสถาน"],
+    "ที่พัก": ["ที่พัก", "รีสอร์ท", "โฮมสเตย์", "โรงแรม", "เกสต์เฮาส์"],
+    "สถานที่ท่องเที่ยว": ["สถานที่ท่องเที่ยว", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "แลนด์มาร์ก", "ทะเล"],
+}
+
+# ---------- Utilities ----------
 def _safe_json(text: str) -> dict:
     if not text:
         return {}
@@ -48,32 +84,6 @@ def _history_to_text(history: Optional[List[Dict]], max_turns: int = 8) -> str:
 def _norm(s: str) -> str:
     return (s or "").strip().lower()
 
-STOP_WORDS = {
-    "อยาก", "ช่วย", "หน่อย", "แถว", "ที่", "มี", "ไหม", "มั้ย", "ครับ", "ค่ะ",
-    "คับ", "จ้า", "นะ", "บ้าง", "ขอ", "หา", "ด้วย", "เอา", "หนึ่ง", "นึง", "แนะนำ",
-    "ตรง", "แถวไหน", "ขอหน่อย"
-}
-
-# เดาในเครื่อง (กันพลาด) ครอบคลุมเคสที่เจอบ่อย
-LOCAL_CATEGORY_HINTS = {
-    "ยิม/ฟิตเนส": {"ยิม", "ฟิตเนส", "ออกกำลัง", "เวท", "ฟิตเนต"},
-    "ร้านซ่อมรถ": {"อู่", "ซ่อมรถ", "ศูนย์", "ร้านยาง", "ปะยาง", "แบตเตอรี่", "แม็ก", "ช่วงล่าง"},
-    "ร้านอาหาร": {"กินข้าว", "ข้าว", "กับข้าว", "อาหาร", "หิว"},
-    "คาเฟ่": {"คาเฟ่", "กาแฟ", "ชานม", "ชาเย็น", "ชา", "นั่งชิล"},
-    "ตลาด": {"ตลาด", "ตลาดสด", "ตลาดนัด"},
-    "วัด": {"ไหว้พระ", "วัด", "ทำบุญ"},
-    "ปั๊มน้ำมัน": {"ปั๊ม", "เติมน้ำมัน", "ปั๊มน้ำมัน", "ptt", "บางจาก", "เชลล์", "พีที"},
-    "ที่พัก": {"ที่พัก", "รีสอร์ท", "โฮมสเตย์", "โรงแรม"},
-    "สถานที่ท่องเที่ยว": {"เที่ยว", "ทะเล", "ชายหาด", "จุดชมวิว", "แลนด์มาร์ก"},
-}
-
-def _local_guess_category(user_input: str) -> Optional[str]:
-    txt = _norm(user_input)
-    for cat, words in LOCAL_CATEGORY_HINTS.items():
-        if any(w in txt for w in words):
-            return cat
-    return None
-
 def _extract_keywords(user_input: str, llm_keywords: Optional[str]) -> List[str]:
     pool = set()
     raw = _norm(user_input).replace(",", " ")
@@ -86,9 +96,15 @@ def _extract_keywords(user_input: str, llm_keywords: Optional[str]) -> List[str]
                 pool.add(tok)
     return sorted(pool)
 
+def _local_guess_category(user_input: str) -> Optional[str]:
+    txt = _norm(user_input)
+    for cat, words in LOCAL_CATEGORY_HINTS.items():
+        if any(w in txt for w in words):
+            return cat
+    return None
+
 def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str],
           prefer_tambon: Optional[str], top_k: int = 12) -> List[Dict]:
-    """เรียงคะแนน: fuzzy + โบนัส category/tambon + โบนัสถ้าคีย์เวิร์ดอยู่ในชื่อ"""
     if not rows:
         return []
     q = _norm(query_text)
@@ -109,21 +125,7 @@ def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str],
     scored.sort(key=lambda x: x[0], reverse=True)
     return [r for _, r in scored[:top_k]]
 
-# ----- Allowed categories by intent (ใช้กรองผลลัพธ์ให้ตรงหมวด) -----
-ALLOWED_BY_INTENT = {
-    "ร้านอาหาร": ["ร้านอาหาร", "อาหาร", "ข้าว", "ซีฟู้ด", "ก๋วยเตี๋ยว", "ข้าวต้ม", "ตามสั่ง", "สตรีทฟู้ด", "ของกิน"],
-    "คาเฟ่": ["คาเฟ่", "กาแฟ", "เครื่องดื่ม", "ของหวาน", "ชา", "ชาเย็น", "เบเกอรี่", "คอฟฟี่"],
-    "ยิม/ฟิตเนส": ["ยิม", "ฟิตเนส", "ออกกำลังกาย", "เทรนนิ่ง", "ฟิตเนต"],
-    "ร้านซ่อมรถ": ["ซ่อมรถ", "อู่", "ศูนย์", "ยาง", "ปะยาง", "แบตเตอรี่", "ช่วงล่าง", "แม็ก"],
-    "ปั๊มน้ำมัน": ["ปั๊ม", "ปั๊มน้ำมัน", "ptt", "บางจาก", "เชลล์", "พีที"],
-    "ตลาด": ["ตลาด", "ตลาดสด", "ตลาดนัด"],
-    "วัด": ["วัด", "ไหว้พระ", "ศาสนสถาน"],
-    "ที่พัก": ["ที่พัก", "รีสอร์ท", "โฮมสเตย์", "โรงแรม", "เกสต์เฮาส์"],
-    "สถานที่ท่องเที่ยว": ["สถานที่ท่องเที่ยว", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "แลนด์มาร์ก", "ทะเล"],
-}
-
 def _is_allowed_for_intent(intent: Optional[str], place: Dict) -> bool:
-    """คืน True ถ้าสถานที่เข้ากับเจตนา intent (เช็คทั้ง category และชื่อร้าน)"""
     if not intent:
         return True
     allow = ALLOWED_BY_INTENT.get(intent)
@@ -133,7 +135,7 @@ def _is_allowed_for_intent(intent: Optional[str], place: Dict) -> bool:
     name = _norm(place.get("name") or "")
     return any(k in cat or k in name for k in allow)
 
-# ===== เข้าใจเจตนา (LLM + ตัวอย่าง) =====
+# ---------- Intent Understanding ----------
 def _understand(user_input: str, history_text: str) -> dict:
     sys = (
         "คุณคือผู้ช่วยท้องถิ่นของอำเภอปะทิว จังหวัดชุมพร "
@@ -192,7 +194,7 @@ def _reply_chitchat(user_input: str, history_text: str) -> str:
     except Exception:
         return "ครับผม"
 
-# ====== โหมด "ถามต่อเกี่ยวกับสถานที่" (ข้อความล้วนจากข้อมูลที่มีอยู่) ======
+# ---------- Follow-up Mode (text-only) ----------
 FOLLOWUP_PATTERNS = [
     r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เด่น|แนะนำ|signature|ซิกเนเจอร์)",
     r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เปิดกี่โมง|ปิดกี่โมง|เวลา|ทำการ)",
@@ -227,6 +229,7 @@ def _pick_focus_place(focus_place_id, last_results, maybe_name=None):
     if last_results and len(last_results) == 1:
         return last_results[0]
     if maybe_name:
+        # ใช้ keywords_any ตาม db.py เวอร์ชันทั่วไป
         found = search_places(keywords_any=[maybe_name], limit=5)
         if not found:
             return None
@@ -283,7 +286,25 @@ def _format_place_answer_from_existing_fields(place: dict, user_q: str) -> str:
 
     return "\n".join(parts)
 
-# ===== ฟังก์ชันหลัก =====
+# ---------- Choose / Recommend from last_results ----------
+def _looks_like_choose_request(q: str) -> bool:
+    q = q.strip().lower()
+    phrases = ["เลือก", "ช่วยเลือก", "แนะนำ", "ร้านไหนดี", "ไหนดี", "เลือกสักร้าน", "เลือกให้หน่อย"]
+    return any(p in q for p in phrases)
+
+def _score_for_choice(p: Dict, prefer_category: Optional[str]) -> int:
+    s = 0
+    # ความครบถ้วนของข้อมูล
+    if p.get("highlight"): s += min(60, len(str(p["highlight"])))
+    if p.get("description"): s += min(60, len(str(p["description"])))
+    # มีรูป
+    if p.get("image_url"): s += 30
+    # ตรงหมวด
+    if prefer_category and _is_allowed_for_intent(prefer_category, p):
+        s += 25
+    return s
+
+# ---------- Main ----------
 def get_answer(
     user_input: str,
     user_lat: Optional[float] = None,
@@ -295,19 +316,37 @@ def get_answer(
     history_text = _history_to_text(history, max_turns=8)
     last_results = last_results or []
 
-    # —— โหมด “ถามต่อเกี่ยวกับสถานที่” → ตอบข้อความล้วน ไม่คืนการ์ด ——
+    # 0) ถ้าผู้ใช้ให้ "เลือก/แนะนำ" → เลือกจากผลล่าสุด (ไม่ค้นใหม่)
+    if _looks_like_choose_request(user_input):
+        if not last_results:
+            return ("ตอนนี้ยังไม่มีรายการให้เลือกครับ ลองพิมพ์หาสถานที่ก่อน เช่น “คาเฟ่แถวชุมโค”", [])
+        prefer_cat = _local_guess_category(user_input)  # ถ้าพูดว่า เลือกคาเฟ่/ร้านข้าว…
+        best = sorted(last_results, key=lambda p: _score_for_choice(p, prefer_cat), reverse=True)[0]
+        name = best.get("name", "สถานที่นี้")
+        hi = best.get("highlight") or ""
+        tambon = best.get("tambon") or ""
+        cat = best.get("category") or ""
+        reply = f"ผมขอแนะนำ **{name}** ครับ"
+        if hi: reply += f" — จุดเด่น: {hi}"
+        meta = []
+        if tambon: meta.append(f"ตำบล {tambon}")
+        if cat: meta.append(f"ประเภท {cat}")
+        if meta: reply += f" ({' | '.join(meta)})"
+        return reply.strip(), []
+
+    # 1) โหมด “ถามต่อเกี่ยวกับสถานที่” → ตอบข้อความล้วน ไม่คืนการ์ด
     if _looks_like_followup(user_input):
         maybe_name = _extract_place_name(user_input)
         place = _pick_focus_place(focus_place_id, last_results, maybe_name)
         if place:
             return _format_place_answer_from_existing_fields(place, user_input), []
-        return ("ขอชื่อสถานที่ที่คุณหมายถึงหน่อยครับ เช่น “ตลาดสดปะทิว เด่นอะไร” "
+        return ("ขอชื่อสถานที่ที่คุณหมายถึงหน่อยครับ เช่น “ตลาดเลริวเซ็น เด่นอะไร” "
                 "หรือกดปุ่ม “คุยต่อเกี่ยวกับที่นี่” จากการ์ดสถานที่ก่อนหน้าได้เลยครับ"), []
 
-    # —— เข้าใจเจตนา (ค้นหาหรือคุยเล่น) ——
+    # 2) เข้าใจเจตนา (ค้นหาหรือคุยเล่น)
     u = _understand(user_input, history_text)
 
-    # กัน LLM งง → เดาในเครื่องสำหรับเคสกิน/ดื่ม/หมวดยอดฮิต
+    # guardrail: เดาในเครื่องสำหรับเคสยอดฮิต (กิน/ดื่ม/ฯลฯ)
     if not u.get("want_search"):
         local_cat = _local_guess_category(user_input)
         txt = user_input.lower()
@@ -325,7 +364,7 @@ def get_answer(
     prefer_tambon = u.get("tambon")
     keywords = _extract_keywords(user_input, u.get("keywords"))
 
-    # —— ค้นรอบแรก (ใกล้ฉันถ้ามีพิกัด) ——
+    # 3) ค้นรอบแรก (nearby ถ้ามีพิกัด)
     if user_lat is not None and user_lng is not None:
         base = search_places_nearby(
             user_lat, user_lng,
@@ -333,17 +372,17 @@ def get_answer(
             keywords_any=keywords, limit=60, within_km=20
         )
     else:
-        base = search_places(category=None, tambon=prefer_tambon,
-                             keywords_any=keywords, limit=60)
+        base = search_places(
+            category=None, tambon=prefer_tambon,
+            keywords_any=keywords, limit=60
+        )
 
     ranked = _rank(base, user_input, prefer_category, prefer_tambon, top_k=12)
-
-    # กรองให้ตรงหมวดตามเจตนา
     filtered = [r for r in ranked if _is_allowed_for_intent(prefer_category, r)]
     if filtered:
         ranked = filtered
 
-    # —— ผ่อนเงื่อนไขถ้าน้อย ——
+    # 4) ผ่อนเงื่อนไขถ้ายังน้อย
     if not ranked:
         if user_lat is not None and user_lng is not None:
             base2 = search_places_nearby(
@@ -352,8 +391,10 @@ def get_answer(
                 keywords_any=None, limit=60, within_km=25
             )
         else:
-            base2 = search_places(category=None, tambon=prefer_tambon,
-                                  keywords_any=None, limit=60)
+            base2 = search_places(
+                category=None, tambon=prefer_tambon,
+                keywords_any=None, limit=60
+            )
         ranked = _rank(base2, user_input, prefer_category, prefer_tambon, top_k=12)
         filtered2 = [r for r in ranked if _is_allowed_for_intent(prefer_category, r)]
         if filtered2:
@@ -362,6 +403,6 @@ def get_answer(
     if not ranked:
         return ("ขอโทษนะครับ เหมือนผมอาจจะเข้าใจคลาดเคลื่อนไปนิดหน่อย ลองช่วยถามใหม่อีกทีได้ไหมครับ", [])
 
-    intro = "ตอนนี้มีสถานที่ไหนที่คุณต้องการบ้างมั้ยครับ บอกผมมาได้เลยนะ เผื่อผมมีสถานที่ใกล้เคียงกับความต้องการของคุณ"
+    intro = "ตอนนี้มีสถานที่ไหนที่คุณต้องการบ้างมั้ยครับ บอกผมมาได้เลยนะ เผื่อผมมีสถานที่ที่ใกล้เคียงกับความต้องการของคุณ"
     outro = "ถ้ายังไม่ตรงใจ บอกเพิ่มได้นะครับ เดี๋ยวผมช่วยหาต่อให้เองครับ"
     return (f"{intro}\n\n{outro}", ranked)
