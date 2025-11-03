@@ -1,3 +1,5 @@
+# app.py — passes/keeps banned categories for stability; supports follow-up/map/choose
+
 import json
 from urllib.parse import quote
 

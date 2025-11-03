@@ -1,3 +1,10 @@
+# chatbot.py — stable follow-up + choosing + strict filter + category bans
+# - choose from last_results (no re-query)
+# - follow-up text-only; map/where -> one place card
+# - strict keyword filter to avoid off-topic
+# - banned categories: respects user rejections like "ไม่เอาตลาด", "ตลาดปิดหมด"
+# No DB schema changes.
+
 import json
 import re
 from typing import List, Dict, Tuple, Optional, Set
