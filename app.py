@@ -1,9 +1,3 @@
-# app.py — wired for:
-# - text-only follow-up
-# - choose/recommend from last_results
-# - normal search rendering
-# No DB schema change required.
-
 import json
 from urllib.parse import quote
 
@@ -19,7 +13,7 @@ except Exception:
 # ---------- Page setup ----------
 st.set_page_config(page_title="Pathew Chatbot", page_icon="🌴", layout="centered")
 st.markdown("<h1 style='margin-bottom:0'>🌴 AI Chatbot แนะนำสถานที่ในอำเภอปะทิว</h1>", unsafe_allow_html=True)
-st.caption("พิมพ์ความต้องการ เช่น: ตลาด, คาเฟ่, ร้านซ่อมรถ, ปั๊มน้ำมัน, วัด, หาด ฯลฯ")
+st.caption("พิมพ์ความต้องการ เช่น: ก๋วยเตี๋ยว, คาเฟ่, ยิม, ร้านซ่อมรถ, ปั๊มน้ำมัน, วัด, หาด ฯลฯ")
 
 # ---------- Avatars ----------
 svg_user = """<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='20' cy='20' r='18' fill='#3B82F6'/></svg>"""
@@ -147,7 +141,6 @@ if user_input:
             last_results=st.session_state.get("last_results", []),
         )
     except TypeError:
-        # กันกรณีใช้ chatbot.py รุ่นเก่า
         reply_text, places = get_answer(
             user_input,
             user_lat=st.session_state.get("user_lat"),
