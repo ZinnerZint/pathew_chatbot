@@ -9,6 +9,10 @@ from config import GEMINI_API_KEY
 from db import search_places, search_places_nearby
 
 # ---------- LLM config ----------
+# ตรวจสอบว่า API Key ถูกต้องก่อนเริ่มงาน
+if not GEMINI_API_KEY:
+    print("WARNING: GEMINI_API_KEY is empty. Check your secrets!")
+
 genai.configure(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.0-flash-lite"
 model = genai.GenerativeModel(
@@ -22,7 +26,6 @@ STOP_WORDS = {
     "บ้าง","ขอ","หา","ด้วย","เอา","หนึ่ง","นึง","แนะนำ","ตรง","แถวไหน","ขอหน่อย"
 }
 
-# canonical categories used in DB/intent
 CANON_CATS = ["คาเฟ่","ร้านอาหาร","ยิม/ฟิตเนส","ร้านซ่อมรถ","ปั๊มน้ำมัน","ตลาด","วัด","ที่พัก","สถานที่ท่องเที่ยว"]
 
 LOCAL_CATEGORY_HINTS = {
@@ -111,7 +114,6 @@ def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str],
     return [r for _, r in scored[:top_k]]
 
 def _filter_by_strict_keywords(rows: List[Dict], keywords: List[str]) -> List[Dict]:
-    """Keep only rows that contain any keyword in name/description/highlight/category."""
     if not keywords: return rows
     result = []
     for r in rows:
@@ -148,26 +150,8 @@ def _understand(user_input: str, history_text: str) -> dict:
         "ถ้าค้นหา ให้บอก category หนึ่งใน: คาเฟ่, ร้านอาหาร, ยิม/ฟิตเนส, ร้านซ่อมรถ, ปั๊มน้ำมัน, ตลาด, วัด, ที่พัก, สถานที่ท่องเที่ยว. "
         "ถ้ามีตำบลในข้อความให้คืน tambon ด้วย (ถ้าไม่แน่ใจให้ null). ตอบเฉพาะ JSON."
     )
-    examples = """
-    ผู้ใช้: ยิมแถวชุมโคมีไหม
-    {"want_search": true, "category": "ยิม/ฟิตเนส", "tambon": "ชุมโค", "keywords": "ยิม, ฟิตเนส"}
-    ผู้ใช้: รถมีปัญหา อยากหาที่ซ่อมยาง
-    {"want_search": true, "category": "ร้านซ่อมรถ", "tambon": null, "keywords": "ซ่อมรถ, ร้านยาง"}
-    ผู้ใช้: หิวข้าว
-    {"want_search": true, "category": "ร้านอาหาร", "tambon": null, "keywords": "อาหาร, ข้าว"}
-    ผู้ใช้: อยากกินกาแฟ
-    {"want_search": true, "category": "คาเฟ่", "tambon": null, "keywords": "กาแฟ, คาเฟ่"}
-    ผู้ใช้: ไม่มีอะไร แค่คุยเล่น
-    {"want_search": false, "category": null, "tambon": null, "keywords": null}
-    """
     prompt = f"""{sys}
-
-บริบทก่อนหน้า (ย่อ):
-{history_text or "(ไม่มีประวัติ)"}
-
-ตัวอย่าง:
-{examples}
-
+บริบทก่อนหน้า: {history_text or "(ไม่มี)"}
 ผู้ใช้: "{user_input}"
 ตอบเป็น JSON เท่านั้น:
 """
@@ -180,23 +164,25 @@ def _understand(user_input: str, history_text: str) -> dict:
             "tambon": data.get("tambon"),
             "keywords": data.get("keywords"),
         }
-    except Exception:
+    except Exception as e:
+        # พ่น Error จริงออกมาเพื่อ Debug
+        print(f"DEBUG: _understand error: {str(e)}")
         return {"want_search": False, "category": None, "tambon": None, "keywords": None}
 
 def _reply_chitchat(user_input: str, history_text: str) -> str:
     prompt = (
         "คุณคือเพื่อนผู้ช่วยท้องถิ่นของอำเภอปะทิว ตอบสั้น สุภาพ อบอุ่น "
-        "และอย่าพยายามยัดเยียดไปเรื่องสถานที่ถ้าผู้ใช้ไม่ได้ถาม\n\n"
         f"บริบทก่อนหน้า:\n{history_text or '(ไม่มีประวัติ)'}\n\n"
         f"ผู้ใช้: {user_input}\nตอบ:"
     )
     try:
         res = model.generate_content(prompt)
         return (res.text or "").strip() or "ครับผม"
-    except Exception:
-        return "ครับผม"
+    except Exception as e:
+        # แก้ไขจุดที่ตอบว่า "ครับผม" ให้แสดง Error จริง
+        return f"ขออภัยครับ เกิดข้อผิดพลาดกับ AI: {str(e)}"
 
-# ---------- Follow-up / Map / Choose detection ----------
+# ---------- Other detection utils (Omitted for brevity, keep your original ones) ----------
 FOLLOWUP_PATTERNS = [
     r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เด่น|แนะนำ|signature|ซิกเนเจอร์)",
     r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เปิดกี่โมง|ปิดกี่โมง|เวลา|ทำการ)",
@@ -233,7 +219,6 @@ def _extract_place_name(q: str) -> str | None:
     s = re.sub(r"\s{2,}", " ", s).strip()
     return s if len(s) >= 2 else None
 
-# ---------- Category ban extractor ----------
 NEG_WORDS = ["ไม่เอา","ไม่อยาก","ไม่ต้อง","ไม่ใช่","ไม่เอาละ","พอแล้ว","ปิด","ปิดหมด","ไม่เปิด","เลิก"]
 
 def _text_to_category(txt: str) -> Optional[str]:
@@ -250,23 +235,19 @@ def _extract_ban_categories(user_input: str, last_results: List[Dict]) -> List[s
     t = _norm(user_input)
     if not any(w in t for w in NEG_WORDS):
         return []
-    # if explicit category in text
     cat = _text_to_category(t)
     if cat:
         return [cat]
-    # if "ปิดหมด" and last results are mostly same category -> ban that
     if "ปิดหมด" in t or "ไม่เปิด" in t:
         if last_results:
             cats = [str(p.get("category") or "") for p in last_results]
             if cats:
-                # pick the most common non-empty category
                 from collections import Counter
                 mc = Counter([c for c in cats if c]).most_common(1)
                 if mc:
                     return [mc[0][0]]
     return []
 
-# ---------- Pick focused place ----------
 def _pick_focus_place(focus_place_id, last_results, maybe_name=None):
     if focus_place_id and last_results:
         for p in last_results:
@@ -292,42 +273,23 @@ def _format_place_answer_from_existing_fields(place: dict, user_q: str) -> str:
     category = (place.get("category") or "").strip()
     tambon = (place.get("tambon") or "").strip()
     lat, lng = place.get("latitude"), place.get("longitude")
-
     def has(x): return bool(x and str(x).lower() not in ["none","null","nan"])
-
     q = user_q.lower()
     parts = []
-
     if any(k in q for k in ["เด่น","signature","ซิกเนเจอร์","แนะนำ"]):
-        if has(highlight):
-            parts.append(f"**จุดเด่นของ {name}:** {highlight}")
-        elif has(desc):
-            parts.append(f"{name} จุดเด่น/ภาพรวม: {desc[:220]}{'...' if len(desc)>220 else ''}")
-        else:
-            parts.append(f"{name} ยังไม่มีข้อมูลจุดเด่นในฐานข้อมูลครับ")
-
-    if any(k in q for k in ["เปิดกี่โมง","ปิดกี่โมง","เวลา","ทำการ"]):
-        parts.append("ตอนนี้ยังไม่ได้บันทึกเวลาเปิด-ปิดไว้ในฐานข้อมูลครับ")
-
-    if any(k in q for k in ["ราคา","ค่าเข้า","ค่าธรรมเนียม","งบ"]):
-        parts.append("ตอนนี้ยังไม่ได้บันทึกราคา/ค่าเข้าของสถานที่นี้ไว้ครับ")
-
+        if has(highlight): parts.append(f"**จุดเด่นของ {name}:** {highlight}")
+        elif has(desc): parts.append(f"{name} จุดเด่น/ภาพรวม: {desc[:220]}...")
     if any(k in q for k in ["อยู่ไหน","พิกัด","แผนที่","ไปยังไง","เส้นทาง","ที่อยู่"]):
         line = []
         if has(category): line.append(f"ประเภท: {category}")
-        if has(tambon):   line.append(f"ตำบล: {tambon}")
-        if lat and lng:   line.append(f"พิกัด: {lat:.6f},{lng:.6f}")
-        parts.append(" / ".join(line) if line else "ยังไม่มีที่อยู่/พิกัดในฐานข้อมูลครับ")
-
+        if has(tambon): line.append(f"ตำบล: {tambon}")
+        if lat and lng: line.append(f"พิกัด: {lat:.6f},{lng:.6f}")
+        parts.append(" / ".join(line))
     if not parts:
         summary = []
         if has(highlight): summary.append(f"จุดเด่น: {highlight}")
-        elif has(desc):    summary.append(desc[:220] + ("..." if len(desc)>220 else ""))
-        if has(category):  summary.append(f"ประเภท: {category}")
-        if has(tambon):    summary.append(f"ตำบล: {tambon}")
-        if lat and lng:    summary.append(f"พิกัด: {lat:.6f},{lng:.6f}")
+        if has(category): summary.append(f"ประเภท: {category}")
         parts.append(" / ".join(summary) or f"{name} ยังไม่มีรายละเอียดมากนักครับ")
-
     return "\n".join(parts)
 
 def _score_for_choice(p: Dict, prefer_category: Optional[str]) -> int:
@@ -346,103 +308,71 @@ def get_answer(
     history: Optional[List[Dict]] = None,
     focus_place_id: Optional[int] = None,
     last_results: Optional[List[Dict]] = None,
-    banned_categories: Optional[List[str]] = None,   # NEW
+    banned_categories: Optional[List[str]] = None,
 ) -> Tuple[str, List[Dict], List[str]]:
-    history_text = _history_to_text(history, max_turns=8)
-    last_results = last_results or []
-    banned_set: Set[str] = set(banned_categories or [])
+    try:
+        history_text = _history_to_text(history, max_turns=8)
+        last_results = last_results or []
+        banned_set: Set[str] = set(banned_categories or [])
 
-    # update bans from the current message
-    newly_banned = _extract_ban_categories(user_input, last_results)
-    banned_set.update(newly_banned)
+        # update bans
+        newly_banned = _extract_ban_categories(user_input, last_results)
+        banned_set.update(newly_banned)
 
-    # 0) choose/แนะนำจากผลล่าสุด
-    if _looks_like_choose_request(user_input):
-        usable = _apply_banned(last_results, banned_set)
-        if not usable:
-            return ("หมวดก่อนหน้านี้ไม่น่าจะเหมาะ ลองบอกหมวดใหม่ได้เลย เช่น ร้านอาหาร/คาเฟ่", [] , list(banned_set))
-        prefer_cat = _local_guess_category(user_input)
-        best = sorted(usable, key=lambda p: _score_for_choice(p, prefer_cat), reverse=True)[0]
-        name = best.get("name", "สถานที่นี้")
-        hi = best.get("highlight") or ""
-        tambon = best.get("tambon") or ""
-        cat = best.get("category") or ""
-        reply = f"ผมขอแนะนำ **{name}** ครับ"
-        if hi: reply += f" — จุดเด่น: {hi}"
-        meta = []
-        if tambon: meta.append(f"ตำบล {tambon}")
-        if cat: meta.append(f"ประเภท {cat}")
-        if meta: reply += f" ({' | '.join(meta)})"
-        return reply.strip(), [], list(banned_set)
+        # 0) choose detection
+        if _looks_like_choose_request(user_input):
+            usable = _apply_banned(last_results, banned_set)
+            if not usable:
+                return ("หมวดก่อนหน้านี้ไม่น่าจะเหมาะ ลองบอกหมวดใหม่ได้เลยครับ", [] , list(banned_set))
+            prefer_cat = _local_guess_category(user_input)
+            best = sorted(usable, key=lambda p: _score_for_choice(p, prefer_cat), reverse=True)[0]
+            name = best.get("name", "สถานที่นี้")
+            return f"ผมขอแนะนำ **{name}** ครับ", [], list(banned_set)
 
-    # 1) follow-up / map
-    if _looks_like_followup(user_input) or _looks_like_map_request(user_input):
-        maybe_name = _extract_place_name(user_input)
-        place = _pick_focus_place(focus_place_id, last_results, maybe_name)
-        if place:
-            if _looks_like_map_request(user_input):
-                return "นี่ครับ แสดงรายละเอียดและปุ่มเปิดแผนที่ให้แล้ว", [place], list(banned_set)
-            return _format_place_answer_from_existing_fields(place, user_input), [], list(banned_set)
-        return ("ขอชื่อสถานที่ที่คุณหมายถึงหน่อยครับ เช่น “ตลาดเลริวเซ็น อยู่ตรงไหน” "
-                "หรือกดปุ่ม “คุยต่อเกี่ยวกับที่นี่” จากการ์ดสถานที่ก่อนหน้าได้ครับ"), [], list(banned_set)
+        # 1) follow-up / map
+        if _looks_like_followup(user_input) or _looks_like_map_request(user_input):
+            maybe_name = _extract_place_name(user_input)
+            place = _pick_focus_place(focus_place_id, last_results, maybe_name)
+            if place:
+                if _looks_like_map_request(user_input):
+                    return "นี่ครับ แผนที่พิกัดของสถานที่", [place], list(banned_set)
+                return _format_place_answer_from_existing_fields(place, user_input), [], list(banned_set)
 
-    # 2) intent
-    u = _understand(user_input, history_text)
+        # 2) intent logic
+        u = _understand(user_input, history_text)
+        
+        # Heuristics
+        if not u.get("want_search"):
+            local_cat = _local_guess_category(user_input)
+            txt = user_input.lower()
+            if any(w in txt for w in ["ชา","กาแฟ","ข้าว","อาหาร","หิว"]):
+                u["want_search"] = True
+                u["category"] = "คาเฟ่" if "ชา" in txt or "กาแฟ" in txt else "ร้านอาหาร"
+            elif local_cat:
+                u["want_search"] = True
+                u["category"] = local_cat
 
-    # heuristic: ถ้าพูด "น่ากิน/อยากกิน" → ร้านอาหาร/คาเฟ่
-    if not u.get("want_search"):
-        local_cat = _local_guess_category(user_input)
-        txt = user_input.lower()
-        if any(w in txt for w in ["ชาเย็น","ชา","กาแฟ","นม","ของหวาน","น้ำ","ข้าว","อาหาร","หิว","กิน","น่ากิน"]):
-            u["want_search"] = True
-            u["category"] = "คาเฟ่" if any(w in txt for w in ["ชา","กาแฟ","คาเฟ่","นม","ของหวาน"]) else "ร้านอาหาร"
-        elif local_cat:
-            u["want_search"] = True
-            u["category"] = u.get("category") or local_cat
+        if not u.get("want_search"):
+            return (_reply_chitchat(user_input, history_text), [], list(banned_set))
 
-    if not u.get("want_search"):
-        return (_reply_chitchat(user_input, history_text), [], list(banned_set))
+        # 3) Search
+        prefer_category = u.get("category")
+        prefer_tambon = u.get("tambon")
+        keywords = _extract_keywords(user_input, u.get("keywords"))
 
-    prefer_category = u.get("category")
-    prefer_tambon = u.get("tambon")
-    keywords = _extract_keywords(user_input, u.get("keywords"))
-
-    # 3) search (exclude banned categories)
-    if user_lat is not None and user_lng is not None:
-        base = search_places_nearby(
-            user_lat, user_lng,
-            category=None, tambon=prefer_tambon,
-            keywords_any=keywords, limit=60, within_km=20
-        )
-    else:
-        base = search_places(category=None, tambon=prefer_tambon, keywords_any=keywords, limit=60)
-
-    base = _apply_banned(base, banned_set)
-    ranked = _rank(base, user_input, prefer_category, prefer_tambon, top_k=12)
-    filtered = [r for r in ranked if _is_allowed_for_intent(prefer_category, r)]
-    if filtered: ranked = filtered
-
-    # 4) relax if empty
-    if not ranked:
-        if user_lat is not None and user_lng is not None:
-            base2 = search_places_nearby(
-                user_lat, user_lng,
-                category=None, tambon=prefer_tambon,
-                keywords_any=None, limit=60, within_km=25
-            )
+        if user_lat and user_lng:
+            base = search_places_nearby(user_lat, user_lng, category=None, tambon=prefer_tambon, keywords_any=keywords)
         else:
-            base2 = search_places(category=None, tambon=prefer_tambon, keywords_any=None, limit=60)
-        base2 = _apply_banned(base2, banned_set)
-        ranked = _rank(base2, user_input, prefer_category, prefer_tambon, top_k=12)
-        filtered2 = [r for r in ranked if _is_allowed_for_intent(prefer_category, r)]
-        if filtered2: ranked = filtered2
+            base = search_places(category=None, tambon=prefer_tambon, keywords_any=keywords)
 
-    # 5) strict keyword filter
-    ranked = _filter_by_strict_keywords(ranked, keywords)
-    if not ranked:
-        human_kw = " ".join(keywords) if keywords else "คำค้นที่ระบุ"
-        return (f"ยังไม่พบสถานที่ที่ตรงกับ {human_kw} แบบชัดเจนครับ ลองระบุคำเพิ่มได้นะ", [], list(banned_set))
+        base = _apply_banned(base, banned_set)
+        ranked = _rank(base, user_input, prefer_category, prefer_tambon)
+        
+        if not ranked:
+            return (f"ขออภัยครับ ยังไม่พบข้อมูลที่ตรงกับ '{user_input}' ในขณะนี้", [], list(banned_set))
 
-    intro = "ตอนนี้มีสถานที่ไหนที่คุณต้องการบ้างมั้ยครับ บอกผมมาได้เลยนะ เผื่อผมมีสถานที่ที่ใกล้เคียงกับความต้องการของคุณ"
-    outro = "ถ้ายังไม่ตรงใจ บอกเพิ่มได้นะครับ เดี๋ยวผมช่วยหาต่อให้เองครับ"
-    return (f"{intro}\n\n{outro}", ranked, list(banned_set))
+        return ("นี่คือสถานที่ที่ผมหามาให้ครับ มีที่ไหนถูกใจไหม?", ranked, list(banned_set))
+
+    except Exception as e:
+        # จุดสุดท้ายที่ป้องกันคำว่า "ครับผม" โดยการบอกสาเหตุ Error จริง
+        return f"เกิดข้อผิดพลาดในการประมวลผล: {str(e)}", [], (banned_categories or [])
