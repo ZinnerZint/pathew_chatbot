@@ -14,7 +14,7 @@ if not GEMINI_API_KEY:
     print("WARNING: GEMINI_API_KEY is empty. Check your secrets!")
 
 genai.configure(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-1.5-flash"
 model = genai.GenerativeModel(
     MODEL_NAME,
     generation_config={"max_output_tokens": 500, "temperature": 0.7, "top_p": 0.95, "top_k": 40}
