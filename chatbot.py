@@ -1,6 +1,3 @@
-print("DEBUG chatbot loaded")
-print(__file__)
-
 import json
 import re
 from typing import List, Dict, Tuple, Optional, Set
@@ -165,7 +162,7 @@ FOLLOWUP_PATTERNS = [
     r"(รูป|ภาพ|มีรูปไหม|ขอรูป|ดูรูป)$",
 ]
 
-# ---------- Utils ----------
+# ---------- Helpers ----------
 def _safe_json(text: str) -> dict:
     if not text:
         return {}
@@ -409,6 +406,57 @@ def _apply_banned(rows: List[Dict], banned: Set[str]) -> List[Dict]:
 
     return [r for r in rows if not banned_cat(str(r.get("category") or ""))]
 
+# ---------- Intent ----------
+def _understand(user_input: str, history_text: str) -> dict:
+    sys = (
+        "คุณคือผู้ช่วยท้องถิ่นของอำเภอปะทิว จังหวัดชุมพร "
+        "ตัดสินใจว่าผู้ใช้กำลังอยาก 'ค้นหาสถานที่' หรือ 'คุยทั่วไป'. "
+        "ถ้าค้นหา ให้บอก category ที่ใกล้เคียงที่สุดจากหมวดทั่วไป เช่น "
+        "คาเฟ่ ร้านอาหาร ที่พัก สถานที่ท่องเที่ยว ปั๊มน้ำมัน วัด ตลาด "
+        "ร้านซ่อมรถ ร้านขายยา โรงยิม ธนาคาร มัสยิด สถานที่ราชการ ฯลฯ "
+        "ถ้ามีตำบลในข้อความให้คืน tambon ด้วย (ถ้าไม่แน่ใจให้ null). "
+        "ถ้ามี keyword สำคัญให้คืน keywords ด้วย. ตอบเฉพาะ JSON."
+    )
+
+    prompt = f"""{sys}
+บริบทก่อนหน้า: {history_text or "(ไม่มี)"}
+ผู้ใช้: "{user_input}"
+
+ตอบเป็น JSON เท่านั้นในรูปแบบนี้:
+{{
+  "want_search": true,
+  "category": "ร้านอาหาร",
+  "tambon": null,
+  "keywords": "ก๋วยเตี๋ยว"
+}}
+"""
+
+    try:
+        res = model.generate_content(prompt)
+        data = _safe_json(getattr(res, "text", ""))
+        return {
+            "want_search": bool(data.get("want_search")),
+            "category": data.get("category"),
+            "tambon": data.get("tambon"),
+            "keywords": data.get("keywords"),
+        }
+    except Exception as e:
+        print(f"DEBUG: _understand error: {str(e)}")
+        return {"want_search": False, "category": None, "tambon": None, "keywords": None}
+
+def _reply_chitchat(user_input: str, history_text: str) -> str:
+    prompt = (
+        "คุณคือเพื่อนผู้ช่วยท้องถิ่นของอำเภอปะทิว ตอบสั้น สุภาพ อบอุ่น "
+        f"บริบทก่อนหน้า:\n{history_text or '(ไม่มีประวัติ)'}\n\n"
+        f"ผู้ใช้: {user_input}\nตอบ:"
+    )
+    try:
+        res = model.generate_content(prompt)
+        return (getattr(res, "text", "") or "").strip() or "ครับผม"
+    except Exception as e:
+        return f"ขออภัยครับ เกิดข้อผิดพลาดกับ AI: {str(e)}"
+
+# ---------- Detection ----------
 def _looks_like_followup(q: str) -> bool:
     q = q.strip().lower()
     return any(re.search(p, q) for p in FOLLOWUP_PATTERNS)
@@ -879,4 +927,3 @@ def get_answer(
 
     except Exception as e:
         return (f"เกิดข้อผิดพลาดในการประมวลผล: {str(e)}", [], (banned_categories or []))
-
