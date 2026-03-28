@@ -119,6 +119,11 @@ def _history_to_text(history: Optional[List[Dict]], max_turns: int = 8) -> str:
 def _norm(s: str) -> str:
     return (s or "").strip().lower()
 
+def _normalize_place_name(s: str) -> str:
+    s = _norm(s)
+    s = re.sub(r"\s+", "", s)
+    return s
+
 def _extract_keywords(user_input: str, llm_keywords: Optional[str]) -> List[str]:
     pool = set()
     raw = _norm(user_input).replace(",", " ")
@@ -132,11 +137,6 @@ def _extract_keywords(user_input: str, llm_keywords: Optional[str]) -> List[str]
     return sorted(pool)
 
 def _extract_keywords_for_nearby(user_input: str, llm_keywords: Optional[str], prefer_category: Optional[str]) -> List[str]:
-    """
-    โหมด nearby-followup:
-    อย่าเอาชื่อสถานที่อ้างอิง/คำว่าใกล้ๆ ไปบังคับค้นแรงเกินไป
-    ให้เน้น category ใหม่เป็นหลัก แล้วใช้ keyword เสริมเท่าที่จำเป็น
-    """
     raw_keywords = _extract_keywords(user_input, llm_keywords)
     prefer_cat_norm = _norm(prefer_category or "")
 
@@ -182,10 +182,42 @@ def _intent_from_keywords(user_input: str) -> Optional[str]:
 
     return None
 
+def _looks_like_explicit_place_name_query(user_input: str) -> bool:
+    txt = _norm(user_input)
+
+    broad_words = [
+        "มี", "ไหม", "มั้ย", "แนะนำ", "ใกล้", "ใกล้ๆ", "ที่ไหน",
+        "อะไร", "บ้าง", "ช่วย", "หน่อย", "เอา", "ขอ", "หา",
+        "ร้าน", "คาเฟ่", "ที่พัก", "ปั๊ม", "ตลาด"
+    ]
+
+    if any(w in txt for w in broad_words):
+        return False
+
+    if len(txt.strip()) < 3:
+        return False
+
+    return True
+
+def _find_exact_name_matches(user_input: str, rows: List[Dict]) -> List[Dict]:
+    qn = _normalize_place_name(user_input)
+    if not qn:
+        return []
+
+    exact = []
+    for r in rows:
+        name = str(r.get("name") or "")
+        if _normalize_place_name(name) == qn:
+            exact.append(r)
+
+    return exact
+
 def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str], prefer_tambon: Optional[str], top_k: int = 12) -> List[Dict]:
     if not rows:
         return []
+
     q = _norm(query_text)
+    q_norm = _normalize_place_name(query_text)
     scored = []
 
     for r in rows:
@@ -198,8 +230,13 @@ def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str], pre
 
         score = fuzz.partial_ratio(q, blob) if q else 0
 
-        if q and q in name.lower():
+        name_norm = _normalize_place_name(name)
+
+        if q_norm and q_norm == name_norm:
+            score += 1000
+        elif q and q in name.lower():
             score += 25
+
         if prefer_category and _norm(prefer_category) in cat.lower():
             score += 18
         if prefer_tambon and _norm(prefer_tambon) in tmb.lower():
@@ -387,6 +424,11 @@ def _pick_focus_place(focus_place_id, last_results, maybe_name=None):
         if not found:
             return None
 
+        # ถ้าชื่อเป๊ะ ให้คืนตัวนั้นก่อน
+        exact_matches = _find_exact_name_matches(maybe_name, found)
+        if exact_matches:
+            return exact_matches[0]
+
         best, score = None, -1
         for p in found:
             s = fuzz.partial_ratio(maybe_name.lower(), (p.get("name") or "").lower())
@@ -493,10 +535,6 @@ def _search_near_reference_place(
     banned_set: Set[str],
     within_km: float = 5.0,
 ) -> Tuple[str, List[Dict], List[str]]:
-    """
-    ใช้พิกัดของสถานที่อ้างอิงในการค้นหาสถานที่หมวดใหม่
-    เช่น หาดทุ่งวัวแล่น -> หา ที่พัก ใกล้ๆ
-    """
     ref_lat = reference_place.get("latitude")
     ref_lng = reference_place.get("longitude")
 
@@ -507,7 +545,6 @@ def _search_near_reference_place(
     guessed_cat = _intent_from_keywords(user_input) or _local_guess_category(user_input)
     prefer_category = u.get("category") or guessed_cat
 
-    # nearby-followup ต้องมี category เป้าหมายชัดเจน
     if not prefer_category:
         return ("ได้ครับ อยากให้ผมหาสถานที่ประเภทไหนใกล้ๆ ที่นี่ เช่น ที่พัก ร้านอาหาร หรือคาเฟ่ครับ", [], list(banned_set))
 
@@ -525,14 +562,12 @@ def _search_near_reference_place(
 
     base = _apply_banned(base, banned_set)
 
-    # ตัดสถานที่อ้างอิงออกจากผลลัพธ์
     ref_id = reference_place.get("id")
     if ref_id is not None:
         base = [p for p in base if p.get("id") != ref_id]
 
     ranked = _rank(base, user_input, prefer_category, None)
 
-    # fallback: ถ้าใส่ keyword แล้วแคบไป ลองหาแบบ category อย่างเดียว
     if not ranked:
         base2 = search_places_nearby(
             ref_lat,
@@ -569,7 +604,6 @@ def get_answer(
         last_results = last_results or []
         banned_set: Set[str] = set(banned_categories or [])
 
-        # update bans
         newly_banned = _extract_ban_categories(user_input, last_results)
         banned_set.update(newly_banned)
 
@@ -610,10 +644,6 @@ def get_answer(
                 return (_format_place_answer_from_existing_fields(place, user_input), [place], list(banned_set))
 
         # 2) nearby-followup from focused place
-        # ตัวอย่าง:
-        # - มีที่พักใกล้ๆ ไหม
-        # - มีร้านอาหารใกล้หาดนี้ไหม
-        # - แถวนี้มีคาเฟ่ไหม
         maybe_named_place = _extract_place_name(user_input)
         focus_place = _pick_focus_place(focus_place_id, last_results, maybe_named_place)
 
@@ -625,6 +655,20 @@ def get_answer(
                 banned_set=banned_set,
                 within_km=5.0
             )
+
+        # 2.5) exact place-name match first
+        if _looks_like_explicit_place_name_query(user_input):
+            exact_candidates = search_places(
+                category=None,
+                tambon=None,
+                keywords_any=[user_input],
+                limit=20
+            )
+            exact_candidates = _apply_banned(exact_candidates, banned_set)
+
+            exact_matches = _find_exact_name_matches(user_input, exact_candidates)
+            if exact_matches:
+                return ("นี่คือสถานที่ที่คุณค้นหาครับ", exact_matches[:1], list(banned_set))
 
         # 3) intent logic from LLM
         u = _understand(user_input, history_text)
@@ -656,7 +700,6 @@ def get_answer(
         prefer_tambon = u.get("tambon")
         keywords = _extract_keywords(user_input, u.get("keywords"))
 
-        # ถ้าผู้ใช้พิมพ์กว้าง ๆ เช่น "หิว", "มีร้านแนะนำไหม" อย่าเอาคำพวกนี้ไปบังคับ strict เกินไป
         broad_food_query = any(w in _norm(user_input) for w in ["หิว", "มีอะไรให้กิน", "กินอะไรดี", "มีร้านแนะนำไหม", "ร้านแนะนำ"])
         broad_query = broad_food_query or len(keywords) == 0
 
@@ -678,7 +721,6 @@ def get_answer(
 
         base = _apply_banned(base, banned_set)
 
-        # ถ้าค้นแบบแคบแล้วไม่เจอ ลองกว้างขึ้นอีกรอบ
         if not base and keywords:
             if user_lat and user_lng:
                 base = search_places_nearby(
@@ -699,7 +741,6 @@ def get_answer(
 
         ranked = _rank(base, user_input, prefer_category, prefer_tambon)
 
-        # ถ้ายังไม่เจอ ลอง fallback แบบไม่กำหนด category แต่ใช้ keywords
         if not ranked and keywords:
             if user_lat and user_lng:
                 base2 = search_places_nearby(user_lat, user_lng, category=None, tambon=prefer_tambon, keywords_any=keywords, limit=20)
