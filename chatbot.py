@@ -1,3 +1,6 @@
+print("DEBUG chatbot loaded")
+print(__file__)
+
 import json
 import re
 from typing import List, Dict, Tuple, Optional, Set
@@ -876,3 +879,4 @@ def get_answer(
 
     except Exception as e:
         return (f"เกิดข้อผิดพลาดในการประมวลผล: {str(e)}", [], (banned_categories or []))
+
