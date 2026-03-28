@@ -34,36 +34,85 @@ STOP_WORDS = {
 }
 
 CANON_CATS = [
-    "คาเฟ่", "ร้านอาหาร", "ยิม/ฟิตเนส", "ร้านซ่อมรถ", "ปั๊มน้ำมัน",
-    "ตลาด", "วัด", "ที่พัก", "สถานที่ท่องเที่ยว"
+    "คาเฟ่", "ร้านอาหาร", "ที่พัก", "สถานที่ท่องเที่ยว", "ปั๊มน้ำมัน",
+    "วัด", "ตลาด", "ร้านซ่อมรถ", "ร้านตัดผม", "ร้านขายยา",
+    "ร้านสะดวกซื้อ", "ธนาคาร", "มัสยิด", "สถานที่ราชการ",
+    "โรงยิม", "สถานีรถไฟ", "ล้างอัดฉีด", "ร้านของฝาก",
+    "ศูนย์จำหน่ายรถ", "อุตสาหกรรม"
 ]
 
+# category จริงจาก DB -> จัดเป็น synonym กลางของระบบ
+CATEGORY_SYNONYMS = {
+    "คาเฟ่": ["คาเฟ่", "ร้านกาแฟ", "ร้านชา"],
+    "ร้านอาหาร": ["ร้านอาหาร"],
+    "ที่พัก": ["ที่พัก", "โรงแรม", "รีสอร์ท", "โฮมสเตย์", "เกสต์เฮาส์"],
+    "สถานที่ท่องเที่ยว": ["สถานที่ท่องเที่ยว", "ชายหาด", "ทะเล", "ภูเขา", "อ่าว", "หาด", "จุดชมวิว", "แลนด์มาร์ก"],
+    "ปั๊มน้ำมัน": ["ปั๊มน้ำมัน"],
+    "วัด": ["วัด", "สำนักสงฆ์"],
+    "ตลาด": ["ตลาด"],
+    "ร้านซ่อมรถ": ["ร้านซ่อมรถ"],
+    "ร้านตัดผม": ["ร้านตัดผม", "ร้านเสริมสวย"],
+    "ร้านขายยา": ["ร้านขายยา", "โรงพยาบาล", "อนามัย"],
+    "ร้านสะดวกซื้อ": ["ร้านสะดวกซื้อ", "ห้างสรรพสินค้า", "ร้านขายของใช้ในบ้าน"],
+    "ธนาคาร": ["ธนาคาร"],
+    "มัสยิด": ["มัสยิด"],
+    "สถานที่ราชการ": ["สถานที่ราชการ"],
+    "โรงยิม": ["โรงยิม", "ยิม", "ฟิตเนส"],
+    "สถานีรถไฟ": ["สถานีรถไฟ"],
+    "ล้างอัดฉีด": ["ล้าง อัด ฉีด", "ล้างอัดฉีด"],
+    "ร้านของฝาก": ["ของฝาก", "ร้านค้า"],
+    "ศูนย์จำหน่ายรถ": ["ศูนย์จำหน่ายรถ"],
+    "อุตสาหกรรม": ["อุตสาหกรรม"],
+}
+
 LOCAL_CATEGORY_HINTS = {
-    "ยิม/ฟิตเนส": {"ยิม", "ฟิตเนส", "ออกกำลัง", "เวท", "ฟิตเนต"},
-    "ร้านซ่อมรถ": {"อู่", "ซ่อมรถ", "ศูนย์", "ร้านยาง", "ปะยาง", "แบตเตอรี่", "แม็ก", "ช่วงล่าง"},
+    "คาเฟ่": {"คาเฟ่", "ร้านกาแฟ", "กาแฟ", "ชาเย็น", "ชา", "ชานม", "เบเกอรี่", "ของหวาน", "ร้านชา", "นั่งชิล"},
     "ร้านอาหาร": {
         "กินข้าว", "ข้าว", "กับข้าว", "อาหาร", "หิว", "ก๋วยเตี๋ยว", "ตามสั่ง", "ซีฟู้ด",
         "น่ากิน", "ของกิน", "กินอะไรดี", "มีอะไรให้กิน", "ร้านข้าว", "หมูกระทะ", "ส้มตำ",
         "ชาบู", "ปิ้งย่าง", "ข้าวแกง", "อาหารทะเล", "ร้านแนะนำ"
     },
-    "คาเฟ่": {"คาเฟ่", "กาแฟ", "ชานม", "ชาเย็น", "ชา", "นั่งชิล", "เบเกอรี่", "ของหวาน"},
-    "ตลาด": {"ตลาด", "ตลาดสด", "ตลาดนัด", "ซื้อของ"},
-    "วัด": {"ไหว้พระ", "วัด", "ทำบุญ"},
+    "ที่พัก": {"ที่พัก", "โรงแรม", "รีสอร์ท", "โฮมสเตย์", "เกสต์เฮาส์"},
+    "สถานที่ท่องเที่ยว": {"สถานที่ท่องเที่ยว", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "แลนด์มาร์ก", "ทะเล", "เที่ยว", "ภูเขา"},
     "ปั๊มน้ำมัน": {"ปั๊ม", "เติมน้ำมัน", "ปั๊มน้ำมัน", "ptt", "บางจาก", "เชลล์", "พีที"},
-    "ที่พัก": {"ที่พัก", "รีสอร์ท", "โฮมสเตย์", "โรงแรม", "เกสต์เฮาส์"},
-    "สถานที่ท่องเที่ยว": {"สถานที่ท่องเที่ยว", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "แลนด์มาร์ก", "ทะเล", "เที่ยว"},
+    "วัด": {"ไหว้พระ", "วัด", "ทำบุญ", "สำนักสงฆ์"},
+    "ตลาด": {"ตลาด", "ตลาดสด", "ตลาดนัด", "ซื้อของ"},
+    "ร้านซ่อมรถ": {"อู่", "ซ่อมรถ", "ร้านยาง", "ปะยาง", "แบตเตอรี่", "แม็ก", "ช่วงล่าง"},
+    "ร้านตัดผม": {"ร้านตัดผม", "ตัดผม", "เสริมสวย", "บาร์เบอร์", "ซาลอน"},
+    "ร้านขายยา": {"ร้านขายยา", "ยา", "เภสัช", "โรงพยาบาล", "อนามัย"},
+    "ร้านสะดวกซื้อ": {"ร้านสะดวกซื้อ", "มินิมาร์ท", "ห้าง", "ห้างสรรพสินค้า", "ของใช้ในบ้าน"},
+    "ธนาคาร": {"ธนาคาร", "atm", "เอทีเอ็ม"},
+    "มัสยิด": {"มัสยิด"},
+    "สถานที่ราชการ": {"สถานที่ราชการ", "อำเภอ", "อบต", "เทศบาล", "หน่วยงานรัฐ"},
+    "โรงยิม": {"โรงยิม", "ยิม", "ฟิตเนส", "ออกกำลังกาย", "เวท"},
+    "สถานีรถไฟ": {"สถานีรถไฟ", "รถไฟ"},
+    "ล้างอัดฉีด": {"ล้างรถ", "ล้าง อัด ฉีด", "ล้างอัดฉีด"},
+    "ร้านของฝาก": {"ของฝาก", "ร้านค้า"},
+    "ศูนย์จำหน่ายรถ": {"ศูนย์จำหน่ายรถ", "โชว์รูมรถ"},
+    "อุตสาหกรรม": {"โรงงาน", "อุตสาหกรรม"},
 }
 
 ALLOWED_BY_INTENT = {
-    "ร้านอาหาร": ["ร้านอาหาร", "อาหาร", "ข้าว", "ซีฟู้ด", "ก๋วยเตี๋ยว", "ข้าวต้ม", "ตามสั่ง", "สตรีทฟู้ด", "ของกิน"],
-    "คาเฟ่": ["คาเฟ่", "กาแฟ", "เครื่องดื่ม", "ของหวาน", "ชา", "ชาเย็น", "เบเกอรี่", "คอฟฟี่"],
-    "ยิม/ฟิตเนส": ["ยิม", "ฟิตเนส", "ออกกำลังกาย", "เทรนนิ่ง", "ฟิตเนต"],
-    "ร้านซ่อมรถ": ["ซ่อมรถ", "อู่", "ศูนย์", "ยาง", "ปะยาง", "แบตเตอรี่", "ช่วงล่าง", "แม็ก"],
-    "ปั๊มน้ำมัน": ["ปั๊ม", "ปั๊มน้ำมัน", "ptt", "บางจาก", "เชลล์", "พีที"],
-    "ตลาด": ["ตลาด", "ตลาดสด", "ตลาดนัด"],
-    "วัด": ["วัด", "ไหว้พระ", "ศาสนสถาน"],
-    "ที่พัก": ["ที่พัก", "รีสอร์ท", "โฮมสเตย์", "โรงแรม", "เกสต์เฮาส์"],
-    "สถานที่ท่องเที่ยว": ["สถานที่ท่องเที่ยว", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "แลนด์มาร์ก", "ทะเล"],
+    "คาเฟ่": CATEGORY_SYNONYMS["คาเฟ่"],
+    "ร้านอาหาร": CATEGORY_SYNONYMS["ร้านอาหาร"],
+    "ที่พัก": CATEGORY_SYNONYMS["ที่พัก"],
+    "สถานที่ท่องเที่ยว": CATEGORY_SYNONYMS["สถานที่ท่องเที่ยว"],
+    "ปั๊มน้ำมัน": CATEGORY_SYNONYMS["ปั๊มน้ำมัน"],
+    "วัด": CATEGORY_SYNONYMS["วัด"],
+    "ตลาด": CATEGORY_SYNONYMS["ตลาด"],
+    "ร้านซ่อมรถ": CATEGORY_SYNONYMS["ร้านซ่อมรถ"] + CATEGORY_SYNONYMS["ศูนย์จำหน่ายรถ"],
+    "ร้านตัดผม": CATEGORY_SYNONYMS["ร้านตัดผม"],
+    "ร้านขายยา": CATEGORY_SYNONYMS["ร้านขายยา"],
+    "ร้านสะดวกซื้อ": CATEGORY_SYNONYMS["ร้านสะดวกซื้อ"],
+    "ธนาคาร": CATEGORY_SYNONYMS["ธนาคาร"],
+    "มัสยิด": CATEGORY_SYNONYMS["มัสยิด"],
+    "สถานที่ราชการ": CATEGORY_SYNONYMS["สถานที่ราชการ"],
+    "โรงยิม": CATEGORY_SYNONYMS["โรงยิม"],
+    "สถานีรถไฟ": CATEGORY_SYNONYMS["สถานีรถไฟ"],
+    "ล้างอัดฉีด": CATEGORY_SYNONYMS["ล้างอัดฉีด"],
+    "ร้านของฝาก": CATEGORY_SYNONYMS["ร้านของฝาก"],
+    "ศูนย์จำหน่ายรถ": CATEGORY_SYNONYMS["ศูนย์จำหน่ายรถ"],
+    "อุตสาหกรรม": CATEGORY_SYNONYMS["อุตสาหกรรม"],
 }
 
 NEG_WORDS = ["ไม่เอา", "ไม่อยาก", "ไม่ต้อง", "ไม่ใช่", "ไม่เอาละ", "พอแล้ว", "ปิด", "ปิดหมด", "ไม่เปิด", "เลิก"]
@@ -72,14 +121,23 @@ FOOD_INTENT_WORDS = [
     "หิว", "กิน", "ของกิน", "อาหาร", "ข้าว", "ก๋วยเตี๋ยว", "ตามสั่ง",
     "ซีฟู้ด", "อาหารทะเล", "มีอะไรให้กิน", "กินอะไรดี", "ร้านแนะนำ", "ร้านอาหาร"
 ]
-CAFE_INTENT_WORDS = ["กาแฟ", "ชา", "คาเฟ่", "ของหวาน", "เบเกอรี่", "ชานม"]
-TRAVEL_INTENT_WORDS = ["เที่ยว", "ที่เที่ยว", "หาด", "ทะเล", "อ่าว", "จุดชมวิว", "สถานที่ท่องเที่ยว"]
-HOTEL_INTENT_WORDS = ["ที่พัก", "โรงแรม", "รีสอร์ท", "โฮมสเตย์"]
+CAFE_INTENT_WORDS = ["กาแฟ", "ชา", "คาเฟ่", "ของหวาน", "เบเกอรี่", "ชานม", "ร้านกาแฟ", "ร้านชา"]
+TRAVEL_INTENT_WORDS = ["เที่ยว", "ที่เที่ยว", "หาด", "ทะเล", "อ่าว", "จุดชมวิว", "สถานที่ท่องเที่ยว", "ชายหาด", "ภูเขา"]
+HOTEL_INTENT_WORDS = ["ที่พัก", "โรงแรม", "รีสอร์ท", "โฮมสเตย์", "เกสต์เฮาส์"]
 GAS_INTENT_WORDS = ["ปั๊ม", "เติมน้ำมัน", "น้ำมันหมด", "ปั๊มน้ำมัน"]
-GYM_INTENT_WORDS = ["ยิม", "ฟิตเนส", "ออกกำลังกาย"]
-CAR_INTENT_WORDS = ["ซ่อมรถ", "อู่", "ปะยาง", "แบตเตอรี่", "ร้านยาง"]
+GYM_INTENT_WORDS = ["ยิม", "ฟิตเนส", "ออกกำลังกาย", "โรงยิม", "เวท"]
+CAR_INTENT_WORDS = ["ซ่อมรถ", "อู่", "ปะยาง", "แบตเตอรี่", "ร้านยาง", "ศูนย์รถ", "ศูนย์จำหน่ายรถ"]
 MARKET_INTENT_WORDS = ["ตลาด", "ซื้อของ", "ตลาดสด", "ตลาดนัด"]
-TEMPLE_INTENT_WORDS = ["วัด", "ไหว้พระ", "ทำบุญ"]
+TEMPLE_INTENT_WORDS = ["วัด", "ไหว้พระ", "ทำบุญ", "สำนักสงฆ์"]
+PHARMACY_INTENT_WORDS = ["ร้านขายยา", "ยา", "โรงพยาบาล", "อนามัย"]
+CONVENIENCE_INTENT_WORDS = ["ร้านสะดวกซื้อ", "มินิมาร์ท", "ห้าง", "ห้างสรรพสินค้า", "ของใช้ในบ้าน"]
+BANK_INTENT_WORDS = ["ธนาคาร", "atm", "เอทีเอ็ม"]
+MOSQUE_INTENT_WORDS = ["มัสยิด"]
+GOV_INTENT_WORDS = ["สถานที่ราชการ", "อบต", "เทศบาล", "อำเภอ", "ราชการ"]
+TRAIN_INTENT_WORDS = ["สถานีรถไฟ", "รถไฟ"]
+WASH_INTENT_WORDS = ["ล้างรถ", "ล้างอัดฉีด", "ล้าง อัด ฉีด"]
+SOUVENIR_INTENT_WORDS = ["ของฝาก"]
+INDUSTRY_INTENT_WORDS = ["โรงงาน", "อุตสาหกรรม"]
 
 NEARBY_WORDS = [
     "ใกล้", "ใกล้ๆ", "ใกล้กัน", "ใกล้ๆกัน", "ใกล้กับ", "แถวนี้", "แถวนั้น",
@@ -124,6 +182,29 @@ def _normalize_place_name(s: str) -> str:
     s = re.sub(r"\s+", "", s)
     return s
 
+def _split_category_tags(cat_value: str) -> List[str]:
+    if not cat_value:
+        return []
+    parts = [p.strip().lower() for p in str(cat_value).split(",")]
+    return [p for p in parts if p]
+
+def _category_matches_intent(place_category: str, intent: Optional[str]) -> bool:
+    if not intent:
+        return True
+
+    synonyms = [_norm(x) for x in ALLOWED_BY_INTENT.get(intent, [intent])]
+    place_tags = _split_category_tags(place_category)
+
+    full_cat = _norm(place_category)
+    if any(s in full_cat for s in synonyms):
+        return True
+
+    for tag in place_tags:
+        if any(s == tag or s in tag for s in synonyms):
+            return True
+
+    return False
+
 def _extract_keywords(user_input: str, llm_keywords: Optional[str]) -> List[str]:
     pool = set()
     raw = _norm(user_input).replace(",", " ")
@@ -141,11 +222,17 @@ def _extract_keywords_for_nearby(user_input: str, llm_keywords: Optional[str], p
     prefer_cat_norm = _norm(prefer_category or "")
 
     cleaned = []
+    cat_syns = [_norm(x) for x in CATEGORY_SYNONYMS.get(prefer_category or "", [prefer_category or ""])]
+
+    strip_words = {_norm(w) for w in REFERENCE_STRIP_WORDS}
+
     for k in raw_keywords:
         kk = _norm(k)
-        if kk in {_norm(w) for w in REFERENCE_STRIP_WORDS}:
+        if kk in strip_words:
             continue
         if prefer_cat_norm and prefer_cat_norm in kk:
+            continue
+        if any(s and s in kk for s in cat_syns):
             continue
         cleaned.append(k)
 
@@ -153,34 +240,52 @@ def _extract_keywords_for_nearby(user_input: str, llm_keywords: Optional[str], p
 
 def _local_guess_category(user_input: str) -> Optional[str]:
     txt = _norm(user_input)
+    scores = {}
+
     for cat, words in LOCAL_CATEGORY_HINTS.items():
-        if any(w in txt for w in words):
-            return cat
-    return None
+        score = sum(1 for w in words if w in txt)
+        if score > 0:
+            scores[cat] = score
+
+    if not scores:
+        return None
+
+    return sorted(scores.items(), key=lambda x: x[1], reverse=True)[0][0]
 
 def _intent_from_keywords(user_input: str) -> Optional[str]:
     txt = _norm(user_input)
 
-    if any(w in txt for w in FOOD_INTENT_WORDS):
-        return "ร้านอาหาร"
-    if any(w in txt for w in CAFE_INTENT_WORDS):
-        return "คาเฟ่"
-    if any(w in txt for w in TRAVEL_INTENT_WORDS):
-        return "สถานที่ท่องเที่ยว"
-    if any(w in txt for w in HOTEL_INTENT_WORDS):
-        return "ที่พัก"
-    if any(w in txt for w in GAS_INTENT_WORDS):
-        return "ปั๊มน้ำมัน"
-    if any(w in txt for w in GYM_INTENT_WORDS):
-        return "ยิม/ฟิตเนส"
-    if any(w in txt for w in CAR_INTENT_WORDS):
-        return "ร้านซ่อมรถ"
-    if any(w in txt for w in MARKET_INTENT_WORDS):
-        return "ตลาด"
-    if any(w in txt for w in TEMPLE_INTENT_WORDS):
-        return "วัด"
+    priority_checks = [
+        ("ที่พัก", HOTEL_INTENT_WORDS),
+        ("ร้านอาหาร", FOOD_INTENT_WORDS),
+        ("คาเฟ่", CAFE_INTENT_WORDS),
+        ("ปั๊มน้ำมัน", GAS_INTENT_WORDS),
+        ("โรงยิม", GYM_INTENT_WORDS),
+        ("ร้านซ่อมรถ", CAR_INTENT_WORDS),
+        ("ตลาด", MARKET_INTENT_WORDS),
+        ("วัด", TEMPLE_INTENT_WORDS),
+        ("ร้านขายยา", PHARMACY_INTENT_WORDS),
+        ("ร้านสะดวกซื้อ", CONVENIENCE_INTENT_WORDS),
+        ("ธนาคาร", BANK_INTENT_WORDS),
+        ("มัสยิด", MOSQUE_INTENT_WORDS),
+        ("สถานที่ราชการ", GOV_INTENT_WORDS),
+        ("สถานีรถไฟ", TRAIN_INTENT_WORDS),
+        ("ล้างอัดฉีด", WASH_INTENT_WORDS),
+        ("ร้านของฝาก", SOUVENIR_INTENT_WORDS),
+        ("อุตสาหกรรม", INDUSTRY_INTENT_WORDS),
+        ("สถานที่ท่องเที่ยว", TRAVEL_INTENT_WORDS),
+    ]
 
-    return None
+    best_cat = None
+    best_score = 0
+
+    for cat, words in priority_checks:
+        score = sum(1 for w in words if w in txt)
+        if score > best_score:
+            best_score = score
+            best_cat = cat
+
+    return best_cat
 
 def _looks_like_explicit_place_name_query(user_input: str) -> bool:
     txt = _norm(user_input)
@@ -188,7 +293,7 @@ def _looks_like_explicit_place_name_query(user_input: str) -> bool:
     broad_words = [
         "มี", "ไหม", "มั้ย", "แนะนำ", "ใกล้", "ใกล้ๆ", "ที่ไหน",
         "อะไร", "บ้าง", "ช่วย", "หน่อย", "เอา", "ขอ", "หา",
-        "ร้าน", "คาเฟ่", "ที่พัก", "ปั๊ม", "ตลาด"
+        "ร้าน", "คาเฟ่", "ที่พัก", "ปั๊ม", "ตลาด", "โรงแรม", "รีสอร์ท"
     ]
 
     if any(w in txt for w in broad_words):
@@ -237,8 +342,8 @@ def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str], pre
         elif q and q in name.lower():
             score += 25
 
-        if prefer_category and _norm(prefer_category) in cat.lower():
-            score += 18
+        if prefer_category and _category_matches_intent(cat, prefer_category):
+            score += 22
         if prefer_tambon and _norm(prefer_tambon) in tmb.lower():
             score += 10
         if hi:
@@ -272,21 +377,23 @@ def _filter_by_strict_keywords(rows: List[Dict], keywords: List[str]) -> List[Di
 def _is_allowed_for_intent(intent: Optional[str], place: Dict) -> bool:
     if not intent:
         return True
-    allow = ALLOWED_BY_INTENT.get(intent)
-    if not allow:
-        return True
-    cat = _norm(place.get("category") or "")
-    name = _norm(place.get("name") or "")
-    desc = _norm(place.get("description") or "")
-    return any(k in cat or k in name or k in desc for k in allow)
+    cat = str(place.get("category") or "")
+    return _category_matches_intent(cat, intent)
 
 def _apply_banned(rows: List[Dict], banned: Set[str]) -> List[Dict]:
     if not banned:
         return rows
 
     def banned_cat(cat: str) -> bool:
-        c = (cat or "").strip()
-        return any(c == b or b in c for b in banned)
+        c = (cat or "").strip().lower()
+        cat_tags = _split_category_tags(c)
+        for b in banned:
+            bb = _norm(b)
+            if bb in c:
+                return True
+            if any(bb == tag or bb in tag for tag in cat_tags):
+                return True
+        return False
 
     return [r for r in rows if not banned_cat(str(r.get("category") or ""))]
 
@@ -295,7 +402,7 @@ def _understand(user_input: str, history_text: str) -> dict:
     sys = (
         "คุณคือผู้ช่วยท้องถิ่นของอำเภอปะทิว จังหวัดชุมพร "
         "ตัดสินใจว่าผู้ใช้กำลังอยาก 'ค้นหาสถานที่' หรือ 'คุยทั่วไป'. "
-        "ถ้าค้นหา ให้บอก category หนึ่งใน: คาเฟ่, ร้านอาหาร, ยิม/ฟิตเนส, ร้านซ่อมรถ, ปั๊มน้ำมัน, ตลาด, วัด, ที่พัก, สถานที่ท่องเที่ยว. "
+        "ถ้าค้นหา ให้บอก category ที่ใกล้เคียงที่สุดจากหมวดทั่วไป เช่น คาเฟ่ ร้านอาหาร ที่พัก สถานที่ท่องเที่ยว ปั๊มน้ำมัน วัด ตลาด ร้านซ่อมรถ ฯลฯ "
         "ถ้ามีตำบลในข้อความให้คืน tambon ด้วย (ถ้าไม่แน่ใจให้ null). ตอบเฉพาะ JSON."
     )
 
@@ -383,12 +490,26 @@ def _extract_place_name(q: str) -> Optional[str]:
 
 def _text_to_category(txt: str) -> Optional[str]:
     t = _norm(txt)
-    for cat, words in LOCAL_CATEGORY_HINTS.items():
-        if any(w in t for w in words):
-            return cat
+
+    # exact canon
     for c in CANON_CATS:
         if _norm(c) in t:
             return c
+
+    # synonyms
+    scores = {}
+    for cat, words in CATEGORY_SYNONYMS.items():
+        score = sum(1 for w in words if _norm(w) in t)
+        if score > 0:
+            scores[cat] = score
+
+    if scores:
+        return sorted(scores.items(), key=lambda x: x[1], reverse=True)[0][0]
+
+    for cat, words in LOCAL_CATEGORY_HINTS.items():
+        if any(w in t for w in words):
+            return cat
+
     return None
 
 def _extract_ban_categories(user_input: str, last_results: List[Dict]) -> List[str]:
@@ -407,7 +528,8 @@ def _extract_ban_categories(user_input: str, last_results: List[Dict]) -> List[s
                 from collections import Counter
                 mc = Counter([c for c in cats if c]).most_common(1)
                 if mc:
-                    return [mc[0][0]]
+                    guessed = _text_to_category(mc[0][0]) or mc[0][0]
+                    return [guessed]
     return []
 
 def _pick_focus_place(focus_place_id, last_results, maybe_name=None):
@@ -420,11 +542,10 @@ def _pick_focus_place(focus_place_id, last_results, maybe_name=None):
         return last_results[0]
 
     if maybe_name:
-        found = search_places(keywords_any=[maybe_name], limit=5)
+        found = search_places(keywords_any=[maybe_name], limit=10)
         if not found:
             return None
 
-        # ถ้าชื่อเป๊ะ ให้คืนตัวนั้นก่อน
         exact_matches = _find_exact_name_matches(maybe_name, found)
         if exact_matches:
             return exact_matches[0]
@@ -509,6 +630,10 @@ def _reply_for_found_places(user_input: str, places: List[Dict], category: Optio
         return "นี่คือสถานที่ท่องเที่ยวที่ผมหามาให้ครับ"
     if category == "ที่พัก":
         return "นี่คือที่พักที่ผมหามาให้ครับ"
+    if category == "ร้านขายยา":
+        return "นี่คือร้านขายยาหรือสถานพยาบาลที่ผมหามาให้ครับ"
+    if category == "โรงยิม":
+        return "นี่คือยิมหรือฟิตเนสที่ผมหามาให้ครับ"
 
     return "นี่คือสถานที่ที่ผมหามาให้ครับ มีที่ไหนถูกใจไหม?"
 
@@ -542,8 +667,10 @@ def _search_near_reference_place(
         return ("ขออภัยครับ สถานที่อ้างอิงนี้ยังไม่มีพิกัด จึงยังหาแบบใกล้ๆ ไม่ได้ครับ", [], list(banned_set))
 
     u = _understand(user_input, history_text)
+
+    # ให้คำถามใหม่ชนะก่อน
     guessed_cat = _intent_from_keywords(user_input) or _local_guess_category(user_input)
-    prefer_category = u.get("category") or guessed_cat
+    prefer_category = guessed_cat or u.get("category")
 
     if not prefer_category:
         return ("ได้ครับ อยากให้ผมหาสถานที่ประเภทไหนใกล้ๆ ที่นี่ เช่น ที่พัก ร้านอาหาร หรือคาเฟ่ครับ", [], list(banned_set))
@@ -556,11 +683,14 @@ def _search_near_reference_place(
         category=prefer_category,
         tambon=None,
         keywords_any=None if len(nearby_keywords) == 0 else nearby_keywords,
-        limit=20,
+        limit=30,
         within_km=within_km
     )
 
     base = _apply_banned(base, banned_set)
+
+    # บีบให้ตรง intent จริง แม้ DB จะมีหลาย tag
+    base = [p for p in base if _is_allowed_for_intent(prefer_category, p)]
 
     ref_id = reference_place.get("id")
     if ref_id is not None:
@@ -572,13 +702,14 @@ def _search_near_reference_place(
         base2 = search_places_nearby(
             ref_lat,
             ref_lng,
-            category=prefer_category,
+            category=None,
             tambon=None,
             keywords_any=None,
-            limit=20,
+            limit=30,
             within_km=within_km
         )
         base2 = _apply_banned(base2, banned_set)
+        base2 = [p for p in base2 if _is_allowed_for_intent(prefer_category, p)]
         if ref_id is not None:
             base2 = [p for p in base2 if p.get("id") != ref_id]
         ranked = _rank(base2, user_input, prefer_category, None)
@@ -618,11 +749,12 @@ def get_answer(
 
             guessed = _intent_from_keywords(user_input) or _local_guess_category(user_input) or "ร้านอาหาร"
             if user_lat and user_lng:
-                base = search_places_nearby(user_lat, user_lng, category=guessed, tambon=None, keywords_any=None, limit=8)
+                base = search_places_nearby(user_lat, user_lng, category=None, tambon=None, keywords_any=None, limit=15)
             else:
-                base = search_places(category=guessed, tambon=None, keywords_any=None, limit=8)
+                base = search_places(category=None, tambon=None, keywords_any=None, limit=15)
 
             base = _apply_banned(base, banned_set)
+            base = [p for p in base if _is_allowed_for_intent(guessed, p)]
             ranked = _rank(base, user_input, guessed, None)
 
             if ranked:
@@ -682,15 +814,12 @@ def get_answer(
             u["category"] = guessed_cat
 
         if not u.get("want_search"):
-            if any(w in txt for w in ["ชา", "กาแฟ", "ข้าว", "อาหาร", "หิว", "กิน", "ของกิน", "ปั๊ม", "เที่ยว", "ที่พัก"]):
+            if any(w in txt for w in [
+                "ชา", "กาแฟ", "ข้าว", "อาหาร", "หิว", "กิน", "ของกิน", "ปั๊ม",
+                "เที่ยว", "ที่พัก", "โรงแรม", "รีสอร์ท", "ยิม", "วัด", "ตลาด", "ยา"
+            ]):
                 u["want_search"] = True
-                u["category"] = guessed_cat or (
-                    "คาเฟ่" if "ชา" in txt or "กาแฟ" in txt else
-                    "ปั๊มน้ำมัน" if "ปั๊ม" in txt else
-                    "สถานที่ท่องเที่ยว" if "เที่ยว" in txt else
-                    "ที่พัก" if "ที่พัก" in txt else
-                    "ร้านอาหาร"
-                )
+                u["category"] = guessed_cat or "สถานที่ท่องเที่ยว"
 
         if not u.get("want_search"):
             return (_reply_chitchat(user_input, history_text), [], list(banned_set))
@@ -706,48 +835,64 @@ def get_answer(
         if user_lat and user_lng:
             base = search_places_nearby(
                 user_lat, user_lng,
-                category=prefer_category,
+                category=None,
                 tambon=prefer_tambon,
                 keywords_any=None if broad_query else keywords,
-                limit=20
+                limit=30
             )
         else:
             base = search_places(
-                category=prefer_category,
+                category=None,
                 tambon=prefer_tambon,
                 keywords_any=None if broad_query else keywords,
-                limit=20
+                limit=30
             )
 
         base = _apply_banned(base, banned_set)
 
+        # บีบ category หลังค้นจาก DB เพื่อรองรับ multi-tag ได้ดีขึ้น
+        if prefer_category:
+            filtered_by_intent = [p for p in base if _is_allowed_for_intent(prefer_category, p)]
+            if filtered_by_intent:
+                base = filtered_by_intent
+
+        # ถ้าค้นแบบแคบแล้วไม่เจอ ลองกว้างขึ้น
         if not base and keywords:
             if user_lat and user_lng:
                 base = search_places_nearby(
                     user_lat, user_lng,
-                    category=prefer_category,
+                    category=None,
                     tambon=prefer_tambon,
                     keywords_any=None,
-                    limit=20
+                    limit=30
                 )
             else:
                 base = search_places(
-                    category=prefer_category,
+                    category=None,
                     tambon=prefer_tambon,
                     keywords_any=None,
-                    limit=20
+                    limit=30
                 )
             base = _apply_banned(base, banned_set)
+            if prefer_category:
+                filtered_by_intent = [p for p in base if _is_allowed_for_intent(prefer_category, p)]
+                if filtered_by_intent:
+                    base = filtered_by_intent
 
         ranked = _rank(base, user_input, prefer_category, prefer_tambon)
 
+        # fallback แบบใช้ keywords
         if not ranked and keywords:
             if user_lat and user_lng:
-                base2 = search_places_nearby(user_lat, user_lng, category=None, tambon=prefer_tambon, keywords_any=keywords, limit=20)
+                base2 = search_places_nearby(user_lat, user_lng, category=None, tambon=prefer_tambon, keywords_any=keywords, limit=30)
             else:
-                base2 = search_places(category=None, tambon=prefer_tambon, keywords_any=keywords, limit=20)
+                base2 = search_places(category=None, tambon=prefer_tambon, keywords_any=keywords, limit=30)
 
             base2 = _apply_banned(base2, banned_set)
+            if prefer_category:
+                filtered_by_intent = [p for p in base2 if _is_allowed_for_intent(prefer_category, p)]
+                if filtered_by_intent:
+                    base2 = filtered_by_intent
             ranked = _rank(base2, user_input, prefer_category, prefer_tambon)
 
         if not ranked:
