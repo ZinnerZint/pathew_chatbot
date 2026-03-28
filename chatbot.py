@@ -41,7 +41,6 @@ CANON_CATS = [
     "ศูนย์จำหน่ายรถ", "อุตสาหกรรม"
 ]
 
-# category จริงจาก DB -> จัดเป็น synonym กลางของระบบ
 CATEGORY_SYNONYMS = {
     "คาเฟ่": ["คาเฟ่", "ร้านกาแฟ", "ร้านชา"],
     "ร้านอาหาร": ["ร้านอาหาร"],
@@ -52,7 +51,7 @@ CATEGORY_SYNONYMS = {
     "ตลาด": ["ตลาด"],
     "ร้านซ่อมรถ": ["ร้านซ่อมรถ"],
     "ร้านตัดผม": ["ร้านตัดผม", "ร้านเสริมสวย"],
-    "ร้านขายยา": ["ร้านขายยา", "โรงพยาบาล", "อนามัย"],
+    "ร้านขายยา": ["ร้านขายยา", "โรงพยาบาล", "อนามัย", "คลินิก"],
     "ร้านสะดวกซื้อ": ["ร้านสะดวกซื้อ", "ห้างสรรพสินค้า", "ร้านขายของใช้ในบ้าน"],
     "ธนาคาร": ["ธนาคาร"],
     "มัสยิด": ["มัสยิด"],
@@ -79,7 +78,7 @@ LOCAL_CATEGORY_HINTS = {
     "ตลาด": {"ตลาด", "ตลาดสด", "ตลาดนัด", "ซื้อของ"},
     "ร้านซ่อมรถ": {"อู่", "ซ่อมรถ", "ร้านยาง", "ปะยาง", "แบตเตอรี่", "แม็ก", "ช่วงล่าง"},
     "ร้านตัดผม": {"ร้านตัดผม", "ตัดผม", "เสริมสวย", "บาร์เบอร์", "ซาลอน"},
-    "ร้านขายยา": {"ร้านขายยา", "ยา", "เภสัช", "โรงพยาบาล", "อนามัย"},
+    "ร้านขายยา": {"ร้านขายยา", "ยา", "เภสัช", "โรงพยาบาล", "อนามัย", "คลินิก"},
     "ร้านสะดวกซื้อ": {"ร้านสะดวกซื้อ", "มินิมาร์ท", "ห้าง", "ห้างสรรพสินค้า", "ของใช้ในบ้าน"},
     "ธนาคาร": {"ธนาคาร", "atm", "เอทีเอ็ม"},
     "มัสยิด": {"มัสยิด"},
@@ -129,7 +128,7 @@ GYM_INTENT_WORDS = ["ยิม", "ฟิตเนส", "ออกกำลัง
 CAR_INTENT_WORDS = ["ซ่อมรถ", "อู่", "ปะยาง", "แบตเตอรี่", "ร้านยาง", "ศูนย์รถ", "ศูนย์จำหน่ายรถ"]
 MARKET_INTENT_WORDS = ["ตลาด", "ซื้อของ", "ตลาดสด", "ตลาดนัด"]
 TEMPLE_INTENT_WORDS = ["วัด", "ไหว้พระ", "ทำบุญ", "สำนักสงฆ์"]
-PHARMACY_INTENT_WORDS = ["ร้านขายยา", "ยา", "โรงพยาบาล", "อนามัย"]
+PHARMACY_INTENT_WORDS = ["ร้านขายยา", "ยา", "โรงพยาบาล", "อนามัย", "คลินิก"]
 CONVENIENCE_INTENT_WORDS = ["ร้านสะดวกซื้อ", "มินิมาร์ท", "ห้าง", "ห้างสรรพสินค้า", "ของใช้ในบ้าน"]
 BANK_INTENT_WORDS = ["ธนาคาร", "atm", "เอทีเอ็ม"]
 MOSQUE_INTENT_WORDS = ["มัสยิด"]
@@ -148,6 +147,19 @@ REFERENCE_STRIP_WORDS = [
     "ใกล้", "ใกล้ๆ", "ใกล้กัน", "ใกล้ๆกัน", "ใกล้กับ", "แถวนี้", "แถวนั้น",
     "ละแวกนี้", "รอบๆ", "ใกล้เคียง", "แถว", "ติดกับ", "ที่นี่", "ตรงนี้", "สถานที่นี้",
     "มี", "ไหม", "มั้ย", "บ้าง", "หน่อย", "ช่วย", "หา", "ขอ"
+]
+
+FOLLOWUP_PATTERNS = [
+    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เด่น|แนะนำ|signature|ซิกเนเจอร์)",
+    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เปิดกี่โมง|ปิดกี่โมง|เวลา|ทำการ)",
+    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(ราคา|ค่าเข้า|ค่าธรรมเนียม|งบ)",
+    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(อยู่ไหน|พิกัด|แผนที่|ไปยังไง|เส้นทาง|ที่อยู่)",
+    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(รูป|ภาพ|มีรูปไหม|ขอรูป|ดูรูป)",
+    r"(เด่น|แนะนำ|signature|ซิกเนเจอร์)$",
+    r"(เปิดกี่โมง|ปิดกี่โมง|เวลา|ทำการ)$",
+    r"(ราคา|ค่าเข้า|ค่าธรรมเนียม|งบ)$",
+    r"(อยู่ไหน|พิกัด|แผนที่|ไปยังไง|เส้นทาง|ที่อยู่)$",
+    r"(รูป|ภาพ|มีรูปไหม|ขอรูป|ดูรูป)$",
 ]
 
 # ---------- Utils ----------
@@ -220,12 +232,10 @@ def _extract_keywords(user_input: str, llm_keywords: Optional[str]) -> List[str]
 def _extract_keywords_for_nearby(user_input: str, llm_keywords: Optional[str], prefer_category: Optional[str]) -> List[str]:
     raw_keywords = _extract_keywords(user_input, llm_keywords)
     prefer_cat_norm = _norm(prefer_category or "")
-
-    cleaned = []
     cat_syns = [_norm(x) for x in CATEGORY_SYNONYMS.get(prefer_category or "", [prefer_category or ""])]
-
     strip_words = {_norm(w) for w in REFERENCE_STRIP_WORDS}
 
+    cleaned = []
     for k in raw_keywords:
         kk = _norm(k)
         if kk in strip_words:
@@ -257,6 +267,7 @@ def _intent_from_keywords(user_input: str) -> Optional[str]:
 
     priority_checks = [
         ("ที่พัก", HOTEL_INTENT_WORDS),
+        ("ร้านขายยา", PHARMACY_INTENT_WORDS),
         ("ร้านอาหาร", FOOD_INTENT_WORDS),
         ("คาเฟ่", CAFE_INTENT_WORDS),
         ("ปั๊มน้ำมัน", GAS_INTENT_WORDS),
@@ -264,7 +275,6 @@ def _intent_from_keywords(user_input: str) -> Optional[str]:
         ("ร้านซ่อมรถ", CAR_INTENT_WORDS),
         ("ตลาด", MARKET_INTENT_WORDS),
         ("วัด", TEMPLE_INTENT_WORDS),
-        ("ร้านขายยา", PHARMACY_INTENT_WORDS),
         ("ร้านสะดวกซื้อ", CONVENIENCE_INTENT_WORDS),
         ("ธนาคาร", BANK_INTENT_WORDS),
         ("มัสยิด", MOSQUE_INTENT_WORDS),
@@ -293,7 +303,7 @@ def _looks_like_explicit_place_name_query(user_input: str) -> bool:
     broad_words = [
         "มี", "ไหม", "มั้ย", "แนะนำ", "ใกล้", "ใกล้ๆ", "ที่ไหน",
         "อะไร", "บ้าง", "ช่วย", "หน่อย", "เอา", "ขอ", "หา",
-        "ร้าน", "คาเฟ่", "ที่พัก", "ปั๊ม", "ตลาด", "โรงแรม", "รีสอร์ท"
+        "ร้าน", "คาเฟ่", "ที่พัก", "ปั๊ม", "ตลาด", "โรงแรม", "รีสอร์ท", "โรงพยาบาล", "คลินิก"
     ]
 
     if any(w in txt for w in broad_words):
@@ -334,7 +344,6 @@ def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str], pre
         blob = " ".join([name, cat, tmb, desc, hi]).lower()
 
         score = fuzz.partial_ratio(q, blob) if q else 0
-
         name_norm = _normalize_place_name(name)
 
         if q_norm and q_norm == name_norm:
@@ -397,60 +406,6 @@ def _apply_banned(rows: List[Dict], banned: Set[str]) -> List[Dict]:
 
     return [r for r in rows if not banned_cat(str(r.get("category") or ""))]
 
-# ---------- Intent ----------
-def _understand(user_input: str, history_text: str) -> dict:
-    sys = (
-        "คุณคือผู้ช่วยท้องถิ่นของอำเภอปะทิว จังหวัดชุมพร "
-        "ตัดสินใจว่าผู้ใช้กำลังอยาก 'ค้นหาสถานที่' หรือ 'คุยทั่วไป'. "
-        "ถ้าค้นหา ให้บอก category ที่ใกล้เคียงที่สุดจากหมวดทั่วไป เช่น คาเฟ่ ร้านอาหาร ที่พัก สถานที่ท่องเที่ยว ปั๊มน้ำมัน วัด ตลาด ร้านซ่อมรถ ฯลฯ "
-        "ถ้ามีตำบลในข้อความให้คืน tambon ด้วย (ถ้าไม่แน่ใจให้ null). ตอบเฉพาะ JSON."
-    )
-
-    prompt = f"""{sys}
-บริบทก่อนหน้า: {history_text or "(ไม่มี)"}
-ผู้ใช้: "{user_input}"
-ตอบเป็น JSON เท่านั้น:
-"""
-
-    try:
-        res = model.generate_content(prompt)
-        data = _safe_json(getattr(res, "text", ""))
-        return {
-            "want_search": bool(data.get("want_search")),
-            "category": data.get("category"),
-            "tambon": data.get("tambon"),
-            "keywords": data.get("keywords"),
-        }
-    except Exception as e:
-        print(f"DEBUG: _understand error: {str(e)}")
-        return {"want_search": False, "category": None, "tambon": None, "keywords": None}
-
-def _reply_chitchat(user_input: str, history_text: str) -> str:
-    prompt = (
-        "คุณคือเพื่อนผู้ช่วยท้องถิ่นของอำเภอปะทิว ตอบสั้น สุภาพ อบอุ่น "
-        f"บริบทก่อนหน้า:\n{history_text or '(ไม่มีประวัติ)'}\n\n"
-        f"ผู้ใช้: {user_input}\nตอบ:"
-    )
-    try:
-        res = model.generate_content(prompt)
-        return (getattr(res, "text", "") or "").strip() or "ครับผม"
-    except Exception as e:
-        return f"ขออภัยครับ เกิดข้อผิดพลาดกับ AI: {str(e)}"
-
-# ---------- Other detection utils ----------
-FOLLOWUP_PATTERNS = [
-    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เด่น|แนะนำ|signature|ซิกเนเจอร์)",
-    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(เปิดกี่โมง|ปิดกี่โมง|เวลา|ทำการ)",
-    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(ราคา|ค่าเข้า|ค่าธรรมเนียม|งบ)",
-    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(อยู่ไหน|พิกัด|แผนที่|ไปยังไง|เส้นทาง|ที่อยู่)",
-    r"(ร้านนี้|ที่นี่|ตรงนี้|สถานที่นี้).*(รูป|ภาพ|มีรูปไหม|ขอรูป|ดูรูป)",
-    r"(เด่น|แนะนำ|signature|ซิกเนเจอร์)$",
-    r"(เปิดกี่โมง|ปิดกี่โมง|เวลา|ทำการ)$",
-    r"(ราคา|ค่าเข้า|ค่าธรรมเนียม|งบ)$",
-    r"(อยู่ไหน|พิกัด|แผนที่|ไปยังไง|เส้นทาง|ที่อยู่)$",
-    r"(รูป|ภาพ|มีรูปไหม|ขอรูป|ดูรูป)$",
-]
-
 def _looks_like_followup(q: str) -> bool:
     q = q.strip().lower()
     return any(re.search(p, q) for p in FOLLOWUP_PATTERNS)
@@ -491,12 +446,10 @@ def _extract_place_name(q: str) -> Optional[str]:
 def _text_to_category(txt: str) -> Optional[str]:
     t = _norm(txt)
 
-    # exact canon
     for c in CANON_CATS:
         if _norm(c) in t:
             return c
 
-    # synonyms
     scores = {}
     for cat, words in CATEGORY_SYNONYMS.items():
         score = sum(1 for w in words if _norm(w) in t)
@@ -558,6 +511,22 @@ def _pick_focus_place(focus_place_id, last_results, maybe_name=None):
         return best
 
     return None
+
+def _infer_intent_from_last_results(last_results: List[Dict]) -> Optional[str]:
+    if not last_results:
+        return None
+
+    score_map = {}
+    for p in last_results:
+        cat = str(p.get("category") or "")
+        for canon in CANON_CATS:
+            if _category_matches_intent(cat, canon):
+                score_map[canon] = score_map.get(canon, 0) + 1
+
+    if not score_map:
+        return None
+
+    return sorted(score_map.items(), key=lambda x: x[1], reverse=True)[0][0]
 
 def _format_place_answer_from_existing_fields(place: dict, user_q: str) -> str:
     name = place.get("name") or "สถานที่นี้"
@@ -631,7 +600,7 @@ def _reply_for_found_places(user_input: str, places: List[Dict], category: Optio
     if category == "ที่พัก":
         return "นี่คือที่พักที่ผมหามาให้ครับ"
     if category == "ร้านขายยา":
-        return "นี่คือร้านขายยาหรือสถานพยาบาลที่ผมหามาให้ครับ"
+        return "นี่คือโรงพยาบาล คลินิก หรือร้านขายยาที่ผมหามาให้ครับ"
     if category == "โรงยิม":
         return "นี่คือยิมหรือฟิตเนสที่ผมหามาให้ครับ"
 
@@ -650,6 +619,8 @@ def _reply_for_nearby_found_places(reference_place: Dict, found_places: List[Dic
         return f"นี่คือคาเฟ่ที่อยู่ใกล้ **{ref_name}** ครับ"
     if category == "ปั๊มน้ำมัน":
         return f"นี่คือปั๊มน้ำมันที่อยู่ใกล้ **{ref_name}** ครับ"
+    if category == "ร้านขายยา":
+        return f"นี่คือโรงพยาบาล คลินิก หรือร้านขายยาที่อยู่ใกล้ **{ref_name}** ครับ"
 
     return f"นี่คือสถานที่ใกล้ **{ref_name}** ที่ผมหามาให้ครับ"
 
@@ -667,13 +638,11 @@ def _search_near_reference_place(
         return ("ขออภัยครับ สถานที่อ้างอิงนี้ยังไม่มีพิกัด จึงยังหาแบบใกล้ๆ ไม่ได้ครับ", [], list(banned_set))
 
     u = _understand(user_input, history_text)
-
-    # ให้คำถามใหม่ชนะก่อน
     guessed_cat = _intent_from_keywords(user_input) or _local_guess_category(user_input)
     prefer_category = guessed_cat or u.get("category")
 
     if not prefer_category:
-        return ("ได้ครับ อยากให้ผมหาสถานที่ประเภทไหนใกล้ๆ ที่นี่ เช่น ที่พัก ร้านอาหาร หรือคาเฟ่ครับ", [], list(banned_set))
+        return ("ได้ครับ อยากให้ผมหาสถานที่ประเภทไหนใกล้ๆ ที่นี่ เช่น ที่พัก ร้านอาหาร คาเฟ่ หรือโรงพยาบาลครับ", [], list(banned_set))
 
     nearby_keywords = _extract_keywords_for_nearby(user_input, u.get("keywords"), prefer_category)
 
@@ -688,8 +657,6 @@ def _search_near_reference_place(
     )
 
     base = _apply_banned(base, banned_set)
-
-    # บีบให้ตรง intent จริง แม้ DB จะมีหลาย tag
     base = [p for p in base if _is_allowed_for_intent(prefer_category, p)]
 
     ref_id = reference_place.get("id")
@@ -741,28 +708,36 @@ def get_answer(
         # 0) choose detection
         if _looks_like_choose_request(user_input):
             usable = _apply_banned(last_results, banned_set)
+
+            prefer_cat = _intent_from_keywords(user_input) or _local_guess_category(user_input)
+            if not prefer_cat:
+                prefer_cat = _infer_intent_from_last_results(last_results)
+            if not prefer_cat:
+                prefer_cat = "ร้านอาหาร"
+
             if usable:
-                prefer_cat = _local_guess_category(user_input)
-                best = sorted(usable, key=lambda p: _score_for_choice(p, prefer_cat), reverse=True)[0]
+                filtered_usable = [p for p in usable if _is_allowed_for_intent(prefer_cat, p)]
+                candidate_pool = filtered_usable if filtered_usable else usable
+
+                best = sorted(candidate_pool, key=lambda p: _score_for_choice(p, prefer_cat), reverse=True)[0]
                 name = best.get("name", "สถานที่นี้")
                 return (f"ผมขอแนะนำ **{name}** ครับ", [best], list(banned_set))
 
-            guessed = _intent_from_keywords(user_input) or _local_guess_category(user_input) or "ร้านอาหาร"
             if user_lat and user_lng:
                 base = search_places_nearby(user_lat, user_lng, category=None, tambon=None, keywords_any=None, limit=15)
             else:
                 base = search_places(category=None, tambon=None, keywords_any=None, limit=15)
 
             base = _apply_banned(base, banned_set)
-            base = [p for p in base if _is_allowed_for_intent(guessed, p)]
-            ranked = _rank(base, user_input, guessed, None)
+            base = [p for p in base if _is_allowed_for_intent(prefer_cat, p)]
+            ranked = _rank(base, user_input, prefer_cat, None)
 
             if ranked:
                 best = ranked[0]
                 name = best.get("name", "สถานที่นี้")
                 return (f"ผมขอแนะนำ **{name}** ครับ", [best], list(banned_set))
 
-            return ("หมวดก่อนหน้านี้ไม่น่าจะเหมาะ ลองบอกหมวดใหม่ได้เลยครับ", [], list(banned_set))
+            return ("ขออภัยครับ ตอนนี้ยังไม่พบสถานที่ที่ตรงกับหมวดที่คุณถามอยู่ครับ", [], list(banned_set))
 
         # 1) follow-up / map / image
         if _looks_like_followup(user_input) or _looks_like_map_request(user_input) or _looks_like_image_request(user_input):
@@ -816,7 +791,8 @@ def get_answer(
         if not u.get("want_search"):
             if any(w in txt for w in [
                 "ชา", "กาแฟ", "ข้าว", "อาหาร", "หิว", "กิน", "ของกิน", "ปั๊ม",
-                "เที่ยว", "ที่พัก", "โรงแรม", "รีสอร์ท", "ยิม", "วัด", "ตลาด", "ยา"
+                "เที่ยว", "ที่พัก", "โรงแรม", "รีสอร์ท", "ยิม", "วัด", "ตลาด", "ยา",
+                "โรงพยาบาล", "คลินิก", "อนามัย"
             ]):
                 u["want_search"] = True
                 u["category"] = guessed_cat or "สถานที่ท่องเที่ยว"
@@ -850,13 +826,11 @@ def get_answer(
 
         base = _apply_banned(base, banned_set)
 
-        # บีบ category หลังค้นจาก DB เพื่อรองรับ multi-tag ได้ดีขึ้น
         if prefer_category:
             filtered_by_intent = [p for p in base if _is_allowed_for_intent(prefer_category, p)]
             if filtered_by_intent:
                 base = filtered_by_intent
 
-        # ถ้าค้นแบบแคบแล้วไม่เจอ ลองกว้างขึ้น
         if not base and keywords:
             if user_lat and user_lng:
                 base = search_places_nearby(
@@ -881,7 +855,6 @@ def get_answer(
 
         ranked = _rank(base, user_input, prefer_category, prefer_tambon)
 
-        # fallback แบบใช้ keywords
         if not ranked and keywords:
             if user_lat and user_lng:
                 base2 = search_places_nearby(user_lat, user_lng, category=None, tambon=prefer_tambon, keywords_any=keywords, limit=30)
