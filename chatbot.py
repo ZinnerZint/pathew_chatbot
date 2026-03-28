@@ -367,22 +367,6 @@ def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str], pre
     scored.sort(key=lambda x: x[0], reverse=True)
     return [r for _, r in scored[:top_k]]
 
-def _filter_by_strict_keywords(rows: List[Dict], keywords: List[str]) -> List[Dict]:
-    if not keywords:
-        return rows
-    result = []
-    for r in rows:
-        blob = " ".join([
-            str(r.get("name") or ""),
-            str(r.get("description") or ""),
-            str(r.get("highlight") or ""),
-            str(r.get("category") or ""),
-            str(r.get("tambon") or "")
-        ]).lower()
-        if any(k.lower() in blob for k in keywords):
-            result.append(r)
-    return result
-
 def _is_allowed_for_intent(intent: Optional[str], place: Dict) -> bool:
     if not intent:
         return True
@@ -405,6 +389,25 @@ def _apply_banned(rows: List[Dict], banned: Set[str]) -> List[Dict]:
         return False
 
     return [r for r in rows if not banned_cat(str(r.get("category") or ""))]
+
+def _is_broad_query(user_input: str, keywords: List[str]) -> bool:
+    txt = _norm(user_input)
+
+    broad_markers = [
+        "หิว", "มีอะไรให้กิน", "กินอะไรดี", "มีร้านแนะนำไหม", "ร้านแนะนำ",
+        "มีโรงพยาบาลไหม", "มีโรงพยาบาลแถวนี้ไหม", "มีร้านขายยาไหม", "มีคลินิกไหม",
+        "มีที่พักไหม", "มีคาเฟ่ไหม", "มีร้านอาหารไหม",
+        "มีวัดไหม", "มีตลาดไหม", "มีปั๊มไหม", "มีธนาคารไหม",
+        "มีมัสยิดไหม", "มีสถานีรถไฟไหม"
+    ]
+
+    if any(w in txt for w in broad_markers):
+        return True
+
+    if len(keywords) == 1 and len(keywords[0]) >= 10:
+        return True
+
+    return len(keywords) == 0
 
 # ---------- Intent ----------
 def _understand(user_input: str, history_text: str) -> dict:
@@ -696,13 +699,14 @@ def _search_near_reference_place(
         return ("ได้ครับ อยากให้ผมหาสถานที่ประเภทไหนใกล้ๆ ที่นี่ เช่น ที่พัก ร้านอาหาร คาเฟ่ หรือโรงพยาบาลครับ", [], list(banned_set))
 
     nearby_keywords = _extract_keywords_for_nearby(user_input, u.get("keywords"), prefer_category)
+    broad_query = _is_broad_query(user_input, nearby_keywords)
 
     base = search_places_nearby(
         ref_lat,
         ref_lng,
         category=prefer_category,
         tambon=None,
-        keywords_any=None if len(nearby_keywords) == 0 else nearby_keywords,
+        keywords_any=None if broad_query else nearby_keywords,
         limit=30,
         within_km=within_km
     )
@@ -728,8 +732,10 @@ def _search_near_reference_place(
         )
         base2 = _apply_banned(base2, banned_set)
         base2 = [p for p in base2 if _is_allowed_for_intent(prefer_category, p)]
+
         if ref_id is not None:
             base2 = [p for p in base2 if p.get("id") != ref_id]
+
         ranked = _rank(base2, user_input, prefer_category, None)
 
     if not ranked:
@@ -852,12 +858,10 @@ def get_answer(
             return (_reply_chitchat(user_input, history_text), [], list(banned_set))
 
         # 5) Search
-        prefer_category = u.get("category") or guessed_cat
+        prefer_category = guessed_cat or u.get("category")
         prefer_tambon = u.get("tambon")
         keywords = _extract_keywords(user_input, u.get("keywords"))
-
-        broad_food_query = any(w in _norm(user_input) for w in ["หิว", "มีอะไรให้กิน", "กินอะไรดี", "มีร้านแนะนำไหม", "ร้านแนะนำ"])
-        broad_query = broad_food_query or len(keywords) == 0
+        broad_query = _is_broad_query(user_input, keywords)
 
         if user_lat and user_lng:
             base = search_places_nearby(
@@ -879,8 +883,7 @@ def get_answer(
 
         if prefer_category:
             filtered_by_intent = [p for p in base if _is_allowed_for_intent(prefer_category, p)]
-            if filtered_by_intent:
-                base = filtered_by_intent
+            base = filtered_by_intent
 
         if not base and keywords:
             if user_lat and user_lng:
@@ -901,8 +904,7 @@ def get_answer(
             base = _apply_banned(base, banned_set)
             if prefer_category:
                 filtered_by_intent = [p for p in base if _is_allowed_for_intent(prefer_category, p)]
-                if filtered_by_intent:
-                    base = filtered_by_intent
+                base = filtered_by_intent
 
         ranked = _rank(base, user_input, prefer_category, prefer_tambon)
 
@@ -915,8 +917,7 @@ def get_answer(
             base2 = _apply_banned(base2, banned_set)
             if prefer_category:
                 filtered_by_intent = [p for p in base2 if _is_allowed_for_intent(prefer_category, p)]
-                if filtered_by_intent:
-                    base2 = filtered_by_intent
+                base2 = filtered_by_intent
             ranked = _rank(base2, user_input, prefer_category, prefer_tambon)
 
         if not ranked:
