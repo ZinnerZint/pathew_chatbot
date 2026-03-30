@@ -740,6 +740,22 @@ def _score_for_choice(p: Dict, prefer_category: Optional[str]) -> int:
     if prefer_category and _is_allowed_for_intent(prefer_category, p):
         s += 25
     return s
+def _infer_category_from_places(places: List[Dict]) -> Optional[str]:
+    if not places:
+        return None
+
+    score_map = {}
+
+    for p in places:
+        cat = str(p.get("category") or "")
+        for canon in CANON_CATS:
+            if _category_matches_intent(cat, canon):
+                score_map[canon] = score_map.get(canon, 0) + 1
+
+    if not score_map:
+        return None
+
+    return sorted(score_map.items(), key=lambda x: x[1], reverse=True)[0][0]
 
 def _reply_for_found_places(user_input: str, places: List[Dict], category: Optional[str]) -> str:
     if not places:
@@ -747,22 +763,41 @@ def _reply_for_found_places(user_input: str, places: List[Dict], category: Optio
 
     txt = _norm(user_input)
 
-    if category == "ร้านอาหาร" or any(w in txt for w in ["หิว", "กิน", "อาหาร", "ของกิน", "ร้านแนะนำ"]):
+    detected_category = _infer_category_from_places(places)
+    final_category = detected_category or category
+
+    if final_category == "วัด" or any(w in txt for w in ["ทำบุญ", "ไหว้พระ", "วัด", "สำนักสงฆ์"]):
+        return "ได้เลยครับ นี่คือสถานที่สำหรับทำบุญหรือไหว้พระที่ผมหามาให้ครับ"
+
+    if final_category == "ร้านอาหาร" or any(w in txt for w in ["หิว", "กิน", "อาหาร", "ของกิน", "ร้านแนะนำ"]):
         return "ได้เลยครับ นี่คือร้านอาหารที่น่าลองในปะทิวครับ"
-    if category == "คาเฟ่":
+
+    if final_category == "คาเฟ่":
         return "ได้เลยครับ นี่คือคาเฟ่ที่น่าสนใจครับ"
-    if category == "ปั๊มน้ำมัน":
+
+    if final_category == "ปั๊มน้ำมัน":
         return "ตอนนี้มีสถานที่ที่น่าจะตรงกับเรื่องเติมน้ำมันครับ"
-    if category == "สถานที่ท่องเที่ยว":
+
+    if final_category == "สถานที่ท่องเที่ยว":
         return "นี่คือสถานที่ท่องเที่ยวที่ผมหามาให้ครับ"
-    if category == "ที่พัก":
+
+    if final_category == "ที่พัก":
         return "นี่คือที่พักที่ผมหามาให้ครับ"
-    if category == "ร้านขายยา":
+
+    if final_category == "ร้านขายยา":
         return "นี่คือโรงพยาบาล คลินิก หรือร้านขายยาที่ผมหามาให้ครับ"
-    if category == "โรงยิม":
+
+    if final_category == "โรงยิม":
         return "นี่คือยิมหรือฟิตเนสที่ผมหามาให้ครับ"
-    if category == "ร้านตัดผม":
+
+    if final_category == "ร้านตัดผม":
         return "นี่คือร้านตัดผมหรือร้านเสริมสวยที่ผมหามาให้ครับ"
+
+    if final_category == "ตลาด":
+        return "นี่คือตลาดที่ผมหามาให้ครับ"
+
+    if final_category == "วัด":
+        return "นี่คือวัดที่ผมหามาให้ครับ"
 
     return "นี่คือสถานที่ที่ผมหามาให้ครับ มีที่ไหนถูกใจไหม?"
 
