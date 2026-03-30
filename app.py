@@ -335,22 +335,17 @@ if "banned_categories" not in st.session_state:
 # SIDEBAR
 # =========================================================
 with st.sidebar:
-    st.subheader("แผงควบคุม")
-
     st.markdown("**ตัวอย่างคำถาม**")
-    st.markdown(
-        """
-        <div class="sidebar-note">
-        - มีร้านอาหารแนะนำไหม<br>
-        - ขอคาเฟ่ในปะทิว<br>
-        - ขอที่พักในชุมโค<br>
-        - มีสถานที่ท่องเที่ยวในสะพลีไหม<br>
-        - บ้านต้นไม้อวดชุมเด่นอะไร<br>
-        - ขอแผนที่ของถ้ำเขาไชย
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown("""
+    <div class="example-bubbles">
+        <div class="example-bubble">มีร้านอาหารแนะนำไหม</div>
+        <div class="example-bubble">ขอคาเฟ่ในปะทิว</div>
+        <div class="example-bubble">ขอที่พักในชุมโค</div>
+        <div class="example-bubble">มีสถานที่ท่องเที่ยวในสะพลีไหม</div>
+        <div class="example-bubble">บ้านต้นไม้อวดชุมเด่นอะไร</div>
+        <div class="example-bubble">ขอแผนที่ของถ้ำเขาไชย</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.markdown("---")
 
@@ -440,7 +435,7 @@ def _render_place_card(p: dict):
 left_col, right_col = st.columns([1.08, 0.92], gap="large")
 
 with left_col:
-    st.subheader("แชทกับผู้ช่วย")
+    st.subheader("แชทกับผู้ช่วยปะทิว")
 
     chat_area = st.container(height=620, border=True)
     with chat_area:
