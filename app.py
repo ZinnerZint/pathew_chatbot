@@ -305,7 +305,7 @@ def try_show_image(url: str, caption: str = None):
 
 def render_chat_bubble(role: str, content: str):
     wrapper_class = "user" if role == "user" else "assistant"
-    label = "คุณ" if role == "user" else "ผู้ช่วย"
+    label = "คุณ" if role == "user" else "พี่ปะทิว"
 
     st.markdown(
         f"""
@@ -451,7 +451,7 @@ def _render_place_card(p: dict):
 left_col, right_col = st.columns([1.08, 0.92], gap="large")
 
 with left_col:
-    st.subheader("แชทกับผู้ช่วยปะทิว")
+    st.subheader("แชทกับพี่ปะทิว")
 
     chat_area = st.container(height=620, border=True)
     with chat_area:
