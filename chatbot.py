@@ -307,24 +307,80 @@ def _intent_from_keywords(user_input: str) -> Optional[str]:
 def _forced_category_fallback(user_input: str) -> Optional[str]:
     txt = _norm(user_input)
 
+    # สำคัญ: หมวดที่ต้องตรงจริงให้เช็กก่อน
+    if any(w in txt for w in ["ทำบุญ", "ไหว้พระ", "วัด", "สำนักสงฆ์"]):
+        return "วัด"
+
+    if any(w in txt for w in ["ทะเล", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "ที่เที่ยว", "เที่ยว"]):
+        return "สถานที่ท่องเที่ยว"
+
     if any(w in txt for w in ["น้ำ", "ดื่ม", "กาแฟ", "ชา", "คาเฟ่", "เครื่องดื่ม", "น้ำปั่น", "ชานม", "โกโก้"]):
         return "คาเฟ่"
+
     if any(w in txt for w in ["หิว", "กิน", "อาหาร", "ข้าว", "ก๋วยเตี๋ยว", "ซีฟู้ด", "ของกิน", "ร้านข้าว"]):
         return "ร้านอาหาร"
-    if any(w in txt for w in ["เที่ยว", "ทะเล", "หาด", "อ่าว", "จุดชมวิว", "ที่เที่ยว"]):
-        return "สถานที่ท่องเที่ยว"
+
     if any(w in txt for w in ["พัก", "โรงแรม", "รีสอร์ท", "ที่พัก", "โฮมสเตย์"]):
         return "ที่พัก"
+
     if any(w in txt for w in ["ยา", "คลินิก", "โรงพยาบาล", "อนามัย", "ร้านขายยา"]):
         return "ร้านขายยา"
+
     if any(w in txt for w in ["ตัดผม", "บาร์เบอร์", "เสริมสวย", "ซาลอน"]):
         return "ร้านตัดผม"
+
     if any(w in txt for w in ["อู่", "ซ่อมรถ", "ปะยาง", "แบตเตอรี่", "ร้านยาง"]):
         return "ร้านซ่อมรถ"
+
     if any(w in txt for w in ["ปั๊ม", "เติมน้ำมัน", "น้ำมันหมด"]):
         return "ปั๊มน้ำมัน"
 
     return None
+
+def _is_strict_category(prefer_category: Optional[str]) -> bool:
+    return prefer_category in {
+        "วัด",
+        "สถานที่ท่องเที่ยว",
+        "มัสยิด",
+        "ธนาคาร",
+        "สถานที่ราชการ",
+        "สถานีรถไฟ",
+    }
+
+
+def _infer_category_from_places(places: List[Dict]) -> Optional[str]:
+    if not places:
+        return None
+
+    score_map = {}
+
+    for p in places:
+        cat = str(p.get("category") or "")
+        for canon in CANON_CATS:
+            if _category_matches_intent(cat, canon):
+                score_map[canon] = score_map.get(canon, 0) + 1
+
+    if not score_map:
+        return None
+
+    return sorted(score_map.items(), key=lambda x: x[1], reverse=True)[0][0]
+
+
+def _post_filter_results_by_query(rows: List[Dict], user_input: str, prefer_category: Optional[str]) -> List[Dict]:
+    if not rows:
+        return rows
+
+    txt = _norm(user_input)
+
+    # ถ้าถามแนวทำบุญ/ไหว้พระ -> เอาเฉพาะวัด
+    if prefer_category == "วัด" or any(w in txt for w in ["ทำบุญ", "ไหว้พระ", "วัด", "สำนักสงฆ์"]):
+        return [r for r in rows if _is_allowed_for_intent("วัด", r)]
+
+    # ถ้าถามแนวทะเล/ชายหาด -> เอาเฉพาะสถานที่ท่องเที่ยว
+    if prefer_category == "สถานที่ท่องเที่ยว" and any(w in txt for w in ["ทะเล", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "ที่เที่ยว", "เที่ยว"]):
+        return [r for r in rows if _is_allowed_for_intent("สถานที่ท่องเที่ยว", r)]
+
+    return rows
 
 def _looks_like_explicit_place_name_query(user_input: str) -> bool:
     txt = _norm(user_input)
@@ -451,18 +507,25 @@ def _category_examples_text() -> str:
 def _fallback_reply(user_input: str, prefer_category: Optional[str]) -> str:
     forced = prefer_category or _forced_category_fallback(user_input)
 
-    if forced == "คาเฟ่":
-        return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ถ้าต้องการ ผมช่วยหาร้านคาเฟ่หรือร้านเครื่องดื่มใกล้เคียงให้ได้นะครับ ☕"
-    if forced == "ร้านอาหาร":
-        return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ผมช่วยหาร้านอาหารใกล้เคียงให้แทนได้นะครับ 🍽️"
-    if forced == "สถานที่ท่องเที่ยว":
-        return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ผมช่วยแนะนำสถานที่ท่องเที่ยวใกล้เคียงให้แทนได้นะครับ 🌴"
-    if forced == "ที่พัก":
-        return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ผมช่วยหาที่พักใกล้เคียงให้แทนได้นะครับ 🏨"
-    if forced == "ร้านขายยา":
-        return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ผมช่วยหาร้านขายยา คลินิก หรือโรงพยาบาลใกล้เคียงให้แทนได้นะครับ 💊"
+    if forced == "วัด":
+        return "ตอนนี้ผมยังไม่พบข้อมูลสถานที่ทำบุญหรือวัดที่ตรงคำนี้ครับ ลองพิมพ์ชื่อตำบลหรือชื่อวัดที่ต้องการเพิ่มได้ครับ "
 
-    return "ผมอาจยังตีความคำนี้ไม่ครบครับ 🙏\n" + _category_examples_text()
+    if forced == "สถานที่ท่องเที่ยว":
+        return "ตอนนี้ผมยังไม่พบข้อมูลที่เป็นสถานที่ท่องเที่ยวประเภททะเลหรือชายหาดแบบตรงคำนี้ครับ ลองพิมพ์ชื่อหาด อ่าว หรือชื่อตำบลเพิ่มได้ครับ "
+
+    if forced == "คาเฟ่":
+        return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ถ้าต้องการ ผมช่วยหาร้านคาเฟ่หรือร้านเครื่องดื่มใกล้เคียงให้ได้นะครับ "
+
+    if forced == "ร้านอาหาร":
+        return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ผมช่วยหาร้านอาหารใกล้เคียงให้แทนได้นะครับ 🍽"
+
+    if forced == "ที่พัก":
+        return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ผมช่วยหาที่พักใกล้เคียงให้แทนได้นะครับ "
+
+    if forced == "ร้านขายยา":
+        return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ผมช่วยหาร้านขายยา คลินิก หรือโรงพยาบาลใกล้เคียงให้แทนได้นะครับ "
+
+    return "ผมอาจยังตีความคำนี้ไม่ครบครับ \n" + _category_examples_text()
 
 def _search_by_context(
     user_input: str,
@@ -508,10 +571,18 @@ def _broader_category_fallback(
 
     if prefer_category:
         filtered = [p for p in base if _is_allowed_for_intent(prefer_category, p)]
+        filtered = _post_filter_results_by_query(filtered, user_input, prefer_category)
+
+        # ถ้าเป็นหมวด strict แล้วไม่มีตรงหมวด -> ห้าม fallback มั่ว
+        if _is_strict_category(prefer_category):
+            return _rank(filtered, user_input, prefer_category, prefer_tambon) if filtered else []
+
         if filtered:
             return _rank(filtered, user_input, prefer_category, prefer_tambon)
 
-    return _rank(base, user_input, prefer_category, prefer_tambon)
+    ranked = _rank(base, user_input, prefer_category, prefer_tambon)
+    ranked = _post_filter_results_by_query(ranked, user_input, prefer_category)
+    return _post_filter_results_by_query(ranked, user_input, prefer_category)
 
 # ---------- Intent ----------
 def _understand(user_input: str, history_text: str) -> dict:
@@ -763,6 +834,7 @@ def _reply_for_found_places(user_input: str, places: List[Dict], category: Optio
 
     txt = _norm(user_input)
 
+    # ใช้หมวดจากผลลัพธ์จริงก่อน
     detected_category = _infer_category_from_places(places)
     final_category = detected_category or category
 
@@ -795,9 +867,6 @@ def _reply_for_found_places(user_input: str, places: List[Dict], category: Optio
 
     if final_category == "ตลาด":
         return "นี่คือตลาดที่ผมหามาให้ครับ"
-
-    if final_category == "วัด":
-        return "นี่คือวัดที่ผมหามาให้ครับ"
 
     return "นี่คือสถานที่ที่ผมหามาให้ครับ มีที่ไหนถูกใจไหม?"
 
@@ -1075,6 +1144,7 @@ def get_answer(
                     base2 = filtered_by_intent
 
             ranked = _rank(base2, user_input, prefer_category, prefer_tambon)
+            ranked = _post_filter_results_by_query(ranked, user_input, prefer_category)
 
         # 6) broader fallback by category/context
         if not ranked:
