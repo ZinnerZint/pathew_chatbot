@@ -23,6 +23,22 @@ st.set_page_config(
 # =========================================================
 st.markdown("""
 <style>
+.example-bubbles {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.example-bubble {
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(128,128,128,0.22);
+    font-size: 0.92rem;
+    line-height: 1.45;
+}
+
 .block-container {
     padding-top: 1rem;
     padding-bottom: 1.2rem;
