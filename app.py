@@ -6,25 +6,20 @@ import streamlit as st
 from chatbot import get_answer
 from config import MAPS_API_KEY
 
-try:
-    from streamlit_javascript import st_javascript
-except Exception:
-    st_javascript = None
-
 
 # =========================================================
 # PAGE CONFIG
 # =========================================================
 st.set_page_config(
     page_title="Pathew Chatbot",
-    page_icon="📍",
+    page_icon="P",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 
 # =========================================================
-# LIGHT CSS ONLY (ไม่แต่งแรงเกิน)
+# CSS
 # =========================================================
 st.markdown("""
 <style>
@@ -45,38 +40,88 @@ st.markdown("""
     opacity: 0.9;
 }
 
-.result-card {
-    border: 1px solid rgba(128,128,128,0.25);
-    border-radius: 16px;
-    padding: 12px;
-    margin-bottom: 12px;
-}
-
-.result-title {
-    font-size: 1.05rem;
-    font-weight: 700;
-    margin-bottom: 0.25rem;
-}
-
-.result-meta {
-    font-size: 0.9rem;
-    opacity: 0.9;
-    margin-bottom: 0.4rem;
-}
-
-.result-highlight {
-    border-left: 4px solid #3b82f6;
-    padding-left: 10px;
-    margin-top: 8px;
-    margin-bottom: 8px;
-}
-
 .empty-box {
     border: 1px dashed rgba(128,128,128,0.35);
     border-radius: 14px;
     padding: 18px;
     text-align: center;
     opacity: 0.9;
+}
+
+.chat-bubble-wrap {
+    display: flex;
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.chat-bubble-wrap.user {
+    justify-content: flex-end;
+}
+
+.chat-bubble-wrap.assistant {
+    justify-content: flex-start;
+}
+
+.chat-bubble {
+    max-width: 85%;
+    padding: 12px 14px;
+    border-radius: 16px;
+    line-height: 1.55;
+    font-size: 0.98rem;
+    border: 1px solid rgba(128,128,128,0.22);
+    word-wrap: break-word;
+}
+
+.chat-bubble.user {
+    background: rgba(59, 130, 246, 0.16);
+}
+
+.chat-bubble.assistant {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.chat-name {
+    font-size: 0.78rem;
+    opacity: 0.75;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+.place-card {
+    border: 1px solid rgba(128,128,128,0.25);
+    border-radius: 16px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.place-title {
+    font-size: 1.6rem;
+    font-weight: 800;
+    margin-bottom: 0.35rem;
+    line-height: 1.2;
+}
+
+.place-meta {
+    font-size: 0.92rem;
+    opacity: 0.9;
+    margin-bottom: 0.7rem;
+}
+
+.place-desc {
+    line-height: 1.6;
+    margin-bottom: 0.8rem;
+}
+
+.place-highlight {
+    border-left: 4px solid #3b82f6;
+    padding-left: 10px;
+    margin-top: 8px;
+    margin-bottom: 10px;
+}
+
+.sidebar-note {
+    font-size: 0.92rem;
+    opacity: 0.92;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -87,9 +132,9 @@ st.markdown("""
 # =========================================================
 st.markdown("""
 <div class="hero-box">
-    <h2 style="margin:0 0 6px 0;">📍 AI Chatbot แนะนำสถานที่ในอำเภอปะทิว</h2>
+    <h2 style="margin:0 0 6px 0;">AI Chatbot แนะนำสถานที่ในอำเภอปะทิว</h2>
     <div class="small-note">
-        ค้นหาร้านอาหาร คาเฟ่ ที่พัก สถานที่ท่องเที่ยว ปั๊มน้ำมัน ร้านขายยา และสถานที่ใกล้คุณในอำเภอปะทิว
+        ค้นหาร้านอาหาร คาเฟ่ ที่พัก สถานที่ท่องเที่ยว ปั๊มน้ำมัน ร้านขายยา และสถานที่สำคัญในอำเภอปะทิว
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -242,9 +287,21 @@ def try_show_image(url: str, caption: str = None):
         return False
 
 
-def send_user_message(text: str):
-    st.session_state["pending_input"] = text
-    safe_rerun()
+def render_chat_bubble(role: str, content: str):
+    wrapper_class = "user" if role == "user" else "assistant"
+    label = "คุณ" if role == "user" else "ผู้ช่วย"
+
+    st.markdown(
+        f"""
+        <div class="chat-bubble-wrap {wrapper_class}">
+            <div class="chat-bubble {wrapper_class}">
+                <div class="chat-name">{label}</div>
+                <div>{content}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # =========================================================
@@ -254,7 +311,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant",
-            "content": "สวัสดีครับ 👋 อยากหาสถานที่แบบไหนในอำเภอปะทิว บอกผมได้เลยครับ"
+            "content": "สวัสดีครับ อยากหาสถานที่แบบไหนในอำเภอปะทิว บอกผมได้เลยครับ"
         }
     ]
 
@@ -273,29 +330,6 @@ if "last_results" not in st.session_state:
 if "banned_categories" not in st.session_state:
     st.session_state.banned_categories = []
 
-if "pending_input" not in st.session_state:
-    st.session_state.pending_input = None
-
-
-# =========================================================
-# GEOLOCATION
-# =========================================================
-user_lat = st.session_state.get("user_lat")
-user_lng = st.session_state.get("user_lng")
-
-if st_javascript and (user_lat is None or user_lng is None):
-    try:
-        coords = st_javascript("navigator.geolocation.getCurrentPosition((p) => p.coords);")
-        if isinstance(coords, dict):
-            lat = coords.get("latitude")
-            lng = coords.get("longitude")
-            if lat is not None and lng is not None:
-                st.session_state["user_lat"] = float(lat)
-                st.session_state["user_lng"] = float(lng)
-                user_lat, user_lng = float(lat), float(lng)
-    except Exception:
-        pass
-
 
 # =========================================================
 # SIDEBAR
@@ -303,35 +337,20 @@ if st_javascript and (user_lat is None or user_lng is None):
 with st.sidebar:
     st.subheader("แผงควบคุม")
 
-    st.markdown("**สถานะระบบ**")
-    if st.session_state.user_lat is not None and st.session_state.user_lng is not None:
-        st.success("รับตำแหน่งปัจจุบันแล้ว")
-    else:
-        st.warning("ยังไม่ได้รับตำแหน่งปัจจุบัน")
-
-    st.markdown("---")
-
     st.markdown("**ตัวอย่างคำถาม**")
-    st.caption(
-        "- มีร้านอาหารแถวนี้ไหม\n"
-        "- ขอคาเฟ่ในปะทิว\n"
-        "- มีปั๊มน้ำมันใกล้ฉันไหม\n"
-        "- ตลาดเลริวเซ็นอยู่ห่างจากผมกี่กิโล"
+    st.markdown(
+        """
+        <div class="sidebar-note">
+        - มีร้านอาหารแนะนำไหม<br>
+        - ขอคาเฟ่ในปะทิว<br>
+        - ขอที่พักในชุมโค<br>
+        - มีสถานที่ท่องเที่ยวในสะพลีไหม<br>
+        - บ้านต้นไม้อวดชุมเด่นอะไร<br>
+        - ขอแผนที่ของถ้ำเขาไชย
+        </div>
+        """,
+        unsafe_allow_html=True
     )
-
-    st.markdown("**ปุ่มลัดเริ่มค้นหา**")
-    if st.button("ร้านอาหาร", use_container_width=True):
-        send_user_message("มีร้านอาหารแนะนำไหม")
-    if st.button("คาเฟ่", use_container_width=True):
-        send_user_message("มีคาเฟ่แนะนำไหม")
-    if st.button("ที่เที่ยว", use_container_width=True):
-        send_user_message("มีสถานที่ท่องเที่ยวแนะนำไหม")
-    if st.button("ที่พัก", use_container_width=True):
-        send_user_message("มีที่พักแนะนำไหม")
-    if st.button("มีปั๊มน้ำมัน", use_container_width=True):
-        send_user_message("มีปั๊มน้ำมันใกล้ฉันไหม")
-    if st.button("ร้านขายยา / คลินิก", use_container_width=True):
-        send_user_message("มีร้านขายยาหรือคลินิกแถวนี้ไหม")
 
     st.markdown("---")
 
@@ -344,7 +363,7 @@ with st.sidebar:
         st.session_state.messages = [
             {
                 "role": "assistant",
-                "content": "สวัสดีครับ 👋 อยากหาสถานที่แบบไหนในอำเภอปะทิว บอกผมได้เลยครับ"
+                "content": "สวัสดีครับ อยากหาสถานที่แบบไหนในอำเภอปะทิว บอกผมได้เลยครับ"
             }
         ]
         st.session_state["last_results"] = []
@@ -354,7 +373,7 @@ with st.sidebar:
 
 
 # =========================================================
-# RENDER PLACE CARD
+# PLACE CARD
 # =========================================================
 def _render_place_card(p: dict):
     name = p.get("name", "-")
@@ -364,16 +383,15 @@ def _render_place_card(p: dict):
     category = p.get("category", "-")
     lat = p.get("latitude")
     lng = p.get("longitude")
-    place_id = p.get("id")
 
     map_link = None
     if lat is not None and lng is not None:
         map_link = f"https://www.google.com/maps?q={lat},{lng}"
 
     with st.container(border=True):
-        col1, col2 = st.columns([1, 1.4], gap="medium")
+        img_col, info_col = st.columns([1, 1.45], gap="medium")
 
-        with col1:
+        with img_col:
             shown = False
             image_candidates = get_best_image_candidates(p)
 
@@ -388,70 +406,49 @@ def _render_place_card(p: dict):
             if not shown:
                 st.info("ไม่มีรูปภาพ")
 
-        with col2:
-            st.markdown(f"### {name}")
-            st.caption(f"ประเภท: {category} | ตำบล: {tambon}")
+        with info_col:
+            st.markdown(f'<div class="place-title">{name}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="place-meta">ประเภท: {category} | ตำบล: {tambon}</div>',
+                unsafe_allow_html=True
+            )
 
             if "distance_km" in p and p.get("distance_km") is not None:
                 try:
-                    st.markdown(f"**ระยะทางจากคุณ:** {float(p['distance_km']):.2f} กม.")
+                    st.markdown(f"**ระยะทาง:** {float(p['distance_km']):.2f} กม.")
                 except Exception:
                     pass
 
             if desc:
-                st.write(desc)
+                st.markdown(f'<div class="place-desc">{desc}</div>', unsafe_allow_html=True)
             else:
                 st.write("ยังไม่มีคำอธิบายเพิ่มเติม")
 
             if hi:
-                st.markdown(f"**จุดเด่น:** {hi}")
+                st.markdown(
+                    f'<div class="place-highlight"><b>จุดเด่น:</b> {hi}</div>',
+                    unsafe_allow_html=True
+                )
 
-            btn1, btn2 = st.columns(2)
-
-            with btn1:
-                if map_link:
-                    st.link_button("เปิดแผนที่", map_link, use_container_width=True)
-
-            with btn2:
-                if place_id is not None and st.button("คุยต่อเกี่ยวกับที่นี่", key=f"focus_{place_id}", use_container_width=True):
-                    st.session_state["focus_place_id"] = place_id
-                    safe_rerun()
+            if map_link:
+                st.link_button("เปิดแผนที่", map_link, use_container_width=False)
 
 
 # =========================================================
 # MAIN LAYOUT
 # =========================================================
-left_col, right_col = st.columns([1.1, 0.9], gap="large")
+left_col, right_col = st.columns([1.08, 0.92], gap="large")
 
 with left_col:
     st.subheader("แชทกับผู้ช่วย")
 
-    q1, q2, q3, q4 = st.columns(4)
-    with q1:
-        if st.button("ร้านอาหาร", use_container_width=True):
-            send_user_message("มีร้านอาหารแนะนำไหม")
-    with q2:
-        if st.button("คาเฟ่", use_container_width=True):
-            send_user_message("มีคาเฟ่แนะนำไหม")
-    with q3:
-        if st.button("ใกล้ฉัน", use_container_width=True):
-            send_user_message("มีสถานที่ใกล้ฉันไหม")
-    with q4:
-        if st.button("ที่เที่ยว", use_container_width=True):
-            send_user_message("มีที่เที่ยวแนะนำไหม")
-
     chat_area = st.container(height=620, border=True)
     with chat_area:
         for msg in st.session_state.messages:
-            avatar = avatar_user if msg["role"] == "user" else avatar_bot
-            with st.chat_message(msg["role"], avatar=avatar):
-                st.markdown(msg["content"])
+            render_chat_bubble(msg["role"], msg["content"])
 
 with right_col:
     st.subheader("ผลลัพธ์ล่าสุด")
-
-    if st.session_state.get("focus_place_id"):
-        st.info("ตอนนี้ระบบกำลังโฟกัสสถานที่ที่คุณเลือกไว้ คุณสามารถถามต่อได้ เช่น 'ที่นี่เด่นอะไร' หรือ 'มีอะไรใกล้ที่นี่บ้าง'")
 
     result_area = st.container(height=620, border=True)
     with result_area:
@@ -465,8 +462,8 @@ with right_col:
                 ยังไม่มีผลลัพธ์ล่าสุด<br><br>
                 ลองถามเช่น<br>
                 <b>มีร้านอาหารแนะนำไหม</b><br>
-                หรือ<br>
-                <b>หิว มีอะไรกินแถวนี้บ้าง</b>
+                <b>ขอคาเฟ่ในปะทิว</b><br>
+                <b>ขอแผนที่ของสถานที่นี้</b>
             </div>
             """, unsafe_allow_html=True)
 
@@ -474,15 +471,7 @@ with right_col:
 # =========================================================
 # CHAT INPUT
 # =========================================================
-user_input = st.chat_input("พิมพ์ชื่อสถานที่ ประเภทสถานที่ หรือถามแบบทั่วไปได้เลย...")
-
-
-# =========================================================
-# HANDLE QUICK BUTTON INPUT
-# =========================================================
-if not user_input and st.session_state.get("pending_input"):
-    user_input = st.session_state["pending_input"]
-    st.session_state["pending_input"] = None
+user_input = st.chat_input("พิมพ์ชื่อสถานที่ ประเภทสถานที่ หรือตำบลที่ต้องการได้เลย...")
 
 
 # =========================================================
@@ -493,8 +482,8 @@ if user_input:
 
     result = get_answer(
         user_input,
-        user_lat=st.session_state.get("user_lat"),
-        user_lng=st.session_state.get("user_lng"),
+        user_lat=None,
+        user_lng=None,
         history=st.session_state.messages[-8:],
         focus_place_id=st.session_state.get("focus_place_id"),
         last_results=st.session_state.get("last_results", []),
@@ -522,4 +511,4 @@ if user_input:
 # =========================================================
 # FOOTER
 # =========================================================
-st.caption("Pathew Chatbot • ระบบแนะนำสถานที่ในอำเภอปะทิว")
+st.caption("Pathew Chatbot")
