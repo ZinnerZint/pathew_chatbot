@@ -43,7 +43,7 @@ CANON_CATS = [
 
 CATEGORY_SYNONYMS = {
     "คาเฟ่": ["คาเฟ่", "ร้านกาแฟ", "ร้านชา", "เครื่องดื่ม", "น้ำปั่น", "ชานม", "ชาเย็น"],
-    "ร้านอาหาร": ["ร้านอาหาร", "ร้านข้าว", "ของกิน", "อาหาร", "ของอร่อย"],
+    "ร้านอาหาร": ["ร้านอาหาร", "ร้านข้าว", "ของกิน", "อาหาร", "ของอร่อย", "อาหารทะเล", "ซีฟู้ด"],
     "ที่พัก": ["ที่พัก", "โรงแรม", "รีสอร์ท", "โฮมสเตย์", "เกสต์เฮาส์"],
     "สถานที่ท่องเที่ยว": ["สถานที่ท่องเที่ยว", "ชายหาด", "ทะเล", "ภูเขา", "อ่าว", "หาด", "จุดชมวิว", "แลนด์มาร์ก"],
     "ปั๊มน้ำมัน": ["ปั๊มน้ำมัน", "ปั๊ม"],
@@ -377,6 +377,25 @@ def _post_filter_results_by_query(rows: List[Dict], user_input: str, prefer_cate
 
     return rows
 
+def _strict_category_filter(rows: List[Dict], prefer_category: Optional[str]) -> List[Dict]:
+    if not rows or not prefer_category:
+        return rows
+
+    strict_cats = {
+        "ร้านอาหาร",
+        "คาเฟ่",
+        "ที่พัก",
+        "วัด",
+        "ร้านขายยา",
+        "ร้านตัดผม",
+        "ร้านซ่อมรถ",
+    }
+
+    if prefer_category not in strict_cats:
+        return rows
+
+    return [r for r in rows if _is_allowed_for_intent(prefer_category, r)]
+
 def _looks_like_explicit_place_name_query(user_input: str) -> bool:
     txt = _norm(user_input)
 
@@ -566,6 +585,7 @@ def _broader_category_fallback(
 
     if prefer_category:
         filtered = [p for p in base if _is_allowed_for_intent(prefer_category, p)]
+        filtered = _strict_category_filter(filtered, prefer_category)
         filtered = _post_filter_results_by_query(filtered, user_input, prefer_category)
 
         if _is_strict_category(prefer_category):
@@ -574,6 +594,7 @@ def _broader_category_fallback(
         if filtered:
             return _rank(filtered, user_input, prefer_category, prefer_tambon)
 
+    base = _strict_category_filter(base, prefer_category)
     ranked = _rank(base, user_input, prefer_category, prefer_tambon)
     ranked = _post_filter_results_by_query(ranked, user_input, prefer_category)
     return ranked
@@ -903,6 +924,7 @@ def _search_near_reference_place(
     if filtered:
         base = filtered
 
+    base = _strict_category_filter(base, prefer_category)
     base = _post_filter_results_by_query(base, user_input, prefer_category)
 
     ref_id = reference_place.get("id")
@@ -928,6 +950,7 @@ def _search_near_reference_place(
         if filtered2:
             base2 = filtered2
 
+        base2 = _strict_category_filter(base2, prefer_category)
         base2 = _post_filter_results_by_query(base2, user_input, prefer_category)
 
         if ref_id is not None:
@@ -983,6 +1006,7 @@ def get_answer(
             if usable:
                 filtered_usable = [p for p in usable if _is_allowed_for_intent(prefer_cat, p)]
                 candidate_pool = filtered_usable if filtered_usable else usable
+                candidate_pool = _strict_category_filter(candidate_pool, prefer_cat)
                 candidate_pool = _post_filter_results_by_query(candidate_pool, user_input, prefer_cat)
 
                 if candidate_pool:
@@ -1094,6 +1118,7 @@ def get_answer(
             if filtered_by_intent:
                 base = filtered_by_intent
 
+        base = _strict_category_filter(base, prefer_category)
         base = _post_filter_results_by_query(base, user_input, prefer_category)
 
         if not base and keywords:
@@ -1112,6 +1137,7 @@ def get_answer(
                 if filtered_by_intent:
                     base = filtered_by_intent
 
+            base = _strict_category_filter(base, prefer_category)
             base = _post_filter_results_by_query(base, user_input, prefer_category)
 
         ranked = _rank(base, user_input, prefer_category, prefer_tambon)
@@ -1133,6 +1159,7 @@ def get_answer(
                 if filtered_by_intent:
                     base2 = filtered_by_intent
 
+            base2 = _strict_category_filter(base2, prefer_category)
             base2 = _post_filter_results_by_query(base2, user_input, prefer_category)
 
             ranked = _rank(base2, user_input, prefer_category, prefer_tambon)
