@@ -47,17 +47,11 @@ def _norm_sql(expr: str) -> str:
 
 
 def _build_keywords_or(prefix: str, keywords_any: Optional[List[str]]):
-    """
-    ค้นทั้งแบบปกติ และแบบตัดช่องว่าง/ขีด/underscore
-    เพื่อให้พิมพ์ติดกันหรือไม่มีวรรคยังหาเจอ
-    """
+    """สร้างเงื่อนไข OR สำหรับคีย์เวิร์ดหลายคำ โดยกันคำท่องเที่ยวจากคำอาหารทะเล"""
     if not keywords_any:
         return "TRUE", {}
 
-    clauses = []
-    params = {}
-
-    searchable_cols = ["name", "description", "highlight", "category", "tambon"]
+    clauses, params = [], {}
 
     for i, term in enumerate(keywords_any):
         raw_term = (term or "").strip()
@@ -65,24 +59,56 @@ def _build_keywords_or(prefix: str, keywords_any: Optional[List[str]]):
         if not raw_term:
             continue
 
-        raw_key = f"{prefix}{i}"
+        key = f"{prefix}{i}"
         norm_key = f"{prefix}{i}_norm"
-
-        params[raw_key] = f"%{raw_term}%"
+        params[key] = f"%{raw_term}%"
         params[norm_key] = f"%{norm_term}%"
 
-        col_parts = []
-        for col in searchable_cols:
-            col_parts.append(f"{col} ILIKE %({raw_key})s")
-            col_parts.append(f"{_norm_sql(col)} LIKE %({norm_key})s")
-
-        clauses.append("(" + " OR ".join(col_parts) + ")")
+        if raw_term in ["อาหารทะเล", "ซีฟู้ด"]:
+            clauses.append(
+                "("
+                "name ILIKE %({k})s OR "
+                "category ILIKE %({k})s OR "
+                "description ILIKE %({k})s OR "
+                "{name_norm} LIKE %({nk})s OR "
+                "{cat_norm} LIKE %({nk})s OR "
+                "{desc_norm} LIKE %({nk})s"
+                ")".format(
+                    k=key,
+                    nk=norm_key,
+                    name_norm=_norm_sql("name"),
+                    cat_norm=_norm_sql("category"),
+                    desc_norm=_norm_sql("description"),
+                )
+            )
+        else:
+            clauses.append(
+                "("
+                "name ILIKE %({k})s OR "
+                "description ILIKE %({k})s OR "
+                "highlight ILIKE %({k})s OR "
+                "category ILIKE %({k})s OR "
+                "tambon ILIKE %({k})s OR "
+                "{name_norm} LIKE %({nk})s OR "
+                "{desc_norm} LIKE %({nk})s OR "
+                "{hi_norm} LIKE %({nk})s OR "
+                "{cat_norm} LIKE %({nk})s OR "
+                "{tmb_norm} LIKE %({nk})s"
+                ")".format(
+                    k=key,
+                    nk=norm_key,
+                    name_norm=_norm_sql("name"),
+                    desc_norm=_norm_sql("description"),
+                    hi_norm=_norm_sql("highlight"),
+                    cat_norm=_norm_sql("category"),
+                    tmb_norm=_norm_sql("tambon"),
+                )
+            )
 
     if not clauses:
         return "TRUE", {}
 
     return "(" + " OR ".join(clauses) + ")", params
-
 
 def _select_fields(conn):
     has_id = _has_column(conn, "places", "id")

@@ -332,17 +332,15 @@ def _intent_from_keywords(user_input: str) -> Optional[str]:
 def _forced_category_fallback(user_input: str) -> Optional[str]:
     txt = _norm(user_input)
 
+    # ต้องเช็กอาหารก่อนคำว่า "ทะเล"
+    if any(w in txt for w in ["อาหารทะเล", "ซีฟู้ด", "ของกิน", "หิว", "กิน", "อาหาร", "ข้าว", "ก๋วยเตี๋ยว", "ร้านข้าว"]):
+        return "ร้านอาหาร"
+
     if any(w in txt for w in ["ทำบุญ", "ไหว้พระ", "วัด", "สำนักสงฆ์"]):
         return "วัด"
 
-    if any(w in txt for w in ["ทะเล", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "ที่เที่ยว", "เที่ยว"]):
-        return "สถานที่ท่องเที่ยว"
-
     if any(w in txt for w in ["น้ำ", "ดื่ม", "กาแฟ", "ชา", "คาเฟ่", "เครื่องดื่ม", "น้ำปั่น", "ชานม", "โกโก้"]):
         return "คาเฟ่"
-
-    if any(w in txt for w in ["หิว", "กิน", "อาหาร", "ข้าว", "ก๋วยเตี๋ยว", "ซีฟู้ด", "ของกิน", "ร้านข้าว"]):
-        return "ร้านอาหาร"
 
     if any(w in txt for w in ["พัก", "โรงแรม", "รีสอร์ท", "ที่พัก", "โฮมสเตย์"]):
         return "ที่พัก"
@@ -358,6 +356,9 @@ def _forced_category_fallback(user_input: str) -> Optional[str]:
 
     if any(w in txt for w in ["ปั๊ม", "เติมน้ำมัน", "น้ำมันหมด"]):
         return "ปั๊มน้ำมัน"
+
+    if any(w in txt for w in ["ทะเล", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "ที่เที่ยว", "เที่ยว"]):
+        return "สถานที่ท่องเที่ยว"
 
     return None
 
@@ -601,19 +602,20 @@ def _search_by_context(
     user_lng: Optional[float],
     prefer_tambon: Optional[str],
     keywords: Optional[List[str]],
+    prefer_category: Optional[str] = None,
     limit: int = 30
 ) -> List[Dict]:
     if user_lat is not None and user_lng is not None:
         return search_places_nearby(
             user_lat,
             user_lng,
-            category=None,
+            category=prefer_category,
             tambon=prefer_tambon,
             keywords_any=keywords,
             limit=limit
         )
     return search_places(
-        category=None,
+        category=prefer_category,
         tambon=prefer_tambon,
         keywords_any=keywords,
         limit=limit
@@ -633,6 +635,7 @@ def _broader_category_fallback(
         user_lng=user_lng,
         prefer_tambon=prefer_tambon,
         keywords=None,
+        prefer_category=prefer_category,
         limit=40
     )
     base = _apply_banned(base, banned_set)
@@ -1110,17 +1113,19 @@ def get_answer(
 
         # 2.5) exact place-name match first
         if _looks_like_explicit_place_name_query(user_input):
+            q_compact = _normalize_loose_text(user_input)
             exact_candidates = search_places(
                 category=None,
                 tambon=None,
-                keywords_any=[user_input],
-                limit=20
+                keywords_any=[user_input, q_compact],
+                limit=50
             )
             exact_candidates = _apply_banned(exact_candidates, banned_set)
 
             exact_matches = _find_exact_name_matches(user_input, exact_candidates)
             if exact_matches:
-                return ("นี่คือสถานที่ที่คุณค้นหาครับ", exact_matches[:1], list(banned_set))
+                ranked_exact = _rank(exact_matches, user_input, None, None, top_k=5)
+                return ("นี่คือสถานที่ที่คุณค้นหาครับ", ranked_exact[:1], list(banned_set))
 
         # 3) intent logic from LLM
         u = _understand(user_input, history_text)
@@ -1162,6 +1167,7 @@ def get_answer(
             user_lng=user_lng,
             prefer_tambon=prefer_tambon,
             keywords=None if broad_query else keywords,
+            prefer_category=prefer_category,
             limit=30
         )
 
@@ -1182,6 +1188,7 @@ def get_answer(
                 user_lng=user_lng,
                 prefer_tambon=prefer_tambon,
                 keywords=None,
+                prefer_category=prefer_category,
                 limit=30
             )
             base = _apply_banned(base, banned_set)
@@ -1204,6 +1211,7 @@ def get_answer(
                 user_lng=user_lng,
                 prefer_tambon=prefer_tambon,
                 keywords=keywords,
+                prefer_category=prefer_category,
                 limit=30
             )
             base2 = _apply_banned(base2, banned_set)
