@@ -169,6 +169,11 @@ FOLLOWUP_PATTERNS = [
     r"(รูป|ภาพ|มีรูปไหม|ขอรูป|ดูรูป)$",
 ]
 
+TAMBON_NAMES = [
+    "ชุมโค", "ดอนยาง", "สะพลี", "บางสน",
+    "ทะเลทรัพย์", "ปากคลอง", "เขาไชยราช", "บางน้ำจืด"
+]
+
 # ---------- Helpers ----------
 def _safe_json(text: str) -> dict:
     if not text:
@@ -192,6 +197,32 @@ def _history_to_text(history: Optional[List[Dict]], max_turns: int = 8) -> str:
         if c:
             lines.append(f"{role}: {c}")
     return "\n".join(lines)
+
+def _extract_tambon_from_history(history: Optional[List[Dict]]) -> Optional[str]:
+    if not history:
+        return None
+
+    for m in reversed(history):
+        if m.get("role") != "user":
+            continue
+
+        text = _norm(str(m.get("content") or "").strip())
+        if not text:
+            continue
+
+        if text.startswith("ตำบล"):
+            remain = text.replace("ตำบล", "", 1).strip()
+            if remain in TAMBON_NAMES:
+                return remain
+
+        if text in TAMBON_NAMES:
+            return text
+
+        for tmb in TAMBON_NAMES:
+            if f"ตำบล{tmb}" in text:
+                return tmb
+
+    return None
 
 def _norm(s: str) -> str:
     return (s or "").strip().lower()
@@ -376,6 +407,29 @@ def _post_filter_results_by_query(rows: List[Dict], user_input: str, prefer_cate
         return [r for r in rows if _is_allowed_for_intent("สถานที่ท่องเที่ยว", r)]
 
     return rows
+
+def _looks_like_tambon_only_query(user_input: str) -> bool:
+    txt = _norm(user_input)
+
+    if txt in TAMBON_NAMES:
+        return True
+
+    if txt.startswith("ตำบล"):
+        remain = txt.replace("ตำบล", "", 1).strip()
+        if remain in TAMBON_NAMES:
+            return True
+
+    return False
+
+def _normalize_tambon_query(user_input: str) -> Optional[str]:
+    txt = _norm(user_input)
+    if txt in TAMBON_NAMES:
+        return txt
+    if txt.startswith("ตำบล"):
+        remain = txt.replace("ตำบล", "", 1).strip()
+        if remain in TAMBON_NAMES:
+            return remain
+    return None
 
 def _looks_like_explicit_place_name_query(user_input: str) -> bool:
     txt = _norm(user_input)
@@ -958,6 +1012,7 @@ def get_answer(
     banned_categories: Optional[List[str]] = None,
 ) -> Tuple[str, List[Dict], List[str]]:
     try:
+        history = history or []
         history_text = _history_to_text(history, max_turns=8)
         last_results = last_results or []
         banned_set: Set[str] = set(banned_categories or [])
@@ -1043,6 +1098,22 @@ def get_answer(
             if exact_matches:
                 return ("นี่คือสถานที่ที่คุณค้นหาครับ", exact_matches[:1], list(banned_set))
 
+        # 2.6) tambon only query
+        if _looks_like_tambon_only_query(user_input):
+            tambon_name = _normalize_tambon_query(user_input)
+            if tambon_name:
+                return (
+                    f"ได้ครับ ตอนนี้ผมรู้แล้วว่าคุณสนใจแถว **ตำบล{tambon_name}**\n"
+                    f"อยากให้ผมหาสถานที่ประเภทไหนในตำบลนี้ครับ เช่น\n"
+                    f"- ร้านอาหาร\n"
+                    f"- คาเฟ่\n"
+                    f"- ที่เที่ยว\n"
+                    f"- วัด\n"
+                    f"- ที่พัก",
+                    [],
+                    list(banned_set)
+                )
+
         # 3) intent logic from LLM
         u = _understand(user_input, history_text)
 
@@ -1074,6 +1145,13 @@ def get_answer(
         # 5) Search
         prefer_category = guessed_cat or u.get("category")
         prefer_tambon = u.get("tambon")
+
+        # ถ้าข้อความนี้ไม่มีตำบล แต่ history ล่าสุดมีตำบล ให้สืบทอดมา
+        if not prefer_tambon:
+            history_tambon = _extract_tambon_from_history(history)
+            if history_tambon:
+                prefer_tambon = history_tambon
+
         keywords = _extract_keywords(user_input, u.get("keywords"))
         broad_query = _is_broad_query(user_input, keywords)
 
