@@ -1,8 +1,8 @@
-# db.py — robust version (ทนต่อคอลัมน์ที่ไม่มีในตาราง เช่น image_urls, id)
 import psycopg2
 import psycopg2.extras
 import streamlit as st
 from typing import List, Dict, Optional
+
 
 def get_conn():
     cfg = st.secrets["postgres"]
@@ -14,6 +14,7 @@ def get_conn():
         password=cfg["password"],
         sslmode=cfg.get("sslmode", "require"),
     )
+
 
 def _has_column(conn, table: str, column: str) -> bool:
     q = """
@@ -28,27 +29,62 @@ def _has_column(conn, table: str, column: str) -> bool:
         cur.execute(q, (table, column))
         return cur.fetchone() is not None
 
+
+def _norm_text(value: str) -> str:
+    if not value:
+        return ""
+    return (
+        value.strip()
+        .lower()
+        .replace(" ", "")
+        .replace("-", "")
+        .replace("_", "")
+    )
+
+
+def _norm_sql(expr: str) -> str:
+    return f"LOWER(REPLACE(REPLACE(REPLACE(COALESCE({expr}, ''), ' ', ''), '-', ''), '_', ''))"
+
+
 def _build_keywords_or(prefix: str, keywords_any: Optional[List[str]]):
-    """สร้างเงื่อนไข OR สำหรับคีย์เวิร์ดหลายคำ (match หลายคอลัมน์)"""
+    """
+    ค้นทั้งแบบปกติ และแบบตัดช่องว่าง/ขีด/underscore
+    เพื่อให้พิมพ์ติดกันหรือไม่มีวรรคยังหาเจอ
+    """
     if not keywords_any:
         return "TRUE", {}
-    clauses, params = [], {}
+
+    clauses = []
+    params = {}
+
+    searchable_cols = ["name", "description", "highlight", "category", "tambon"]
+
     for i, term in enumerate(keywords_any):
-        key = f"{prefix}{i}"
-        params[key] = f"%{term}%"
-        clauses.append(
-            "("
-            "name ILIKE %({k})s OR "
-            "description ILIKE %({k})s OR "
-            "highlight ILIKE %({k})s OR "
-            "category ILIKE %({k})s OR "
-            "tambon ILIKE %({k})s"
-            ")".format(k=key)
-        )
+        raw_term = (term or "").strip()
+        norm_term = _norm_text(raw_term)
+        if not raw_term:
+            continue
+
+        raw_key = f"{prefix}{i}"
+        norm_key = f"{prefix}{i}_norm"
+
+        params[raw_key] = f"%{raw_term}%"
+        params[norm_key] = f"%{norm_term}%"
+
+        col_parts = []
+        for col in searchable_cols:
+            col_parts.append(f"{col} ILIKE %({raw_key})s")
+            col_parts.append(f"{_norm_sql(col)} LIKE %({norm_key})s")
+
+        clauses.append("(" + " OR ".join(col_parts) + ")")
+
+    if not clauses:
+        return "TRUE", {}
+
     return "(" + " OR ".join(clauses) + ")", params
 
+
 def _select_fields(conn):
-    """กำหนดฟิลด์ที่จะ SELECT ตามคอลัมน์ที่มีจริงในตาราง"""
     has_id = _has_column(conn, "places", "id")
     has_image_urls = _has_column(conn, "places", "image_urls")
 
@@ -59,7 +95,6 @@ def _select_fields(conn):
     if has_id:
         fields.insert(0, "id")
 
-    # image_urls อาจไม่มี → สร้างเป็น [] แทน
     if has_image_urls:
         fields.append("COALESCE(image_urls, '[]'::jsonb)::TEXT AS image_urls")
     else:
@@ -67,20 +102,23 @@ def _select_fields(conn):
 
     return ", ".join(fields)
 
+
 def search_places(category=None, tambon=None, keywords_any=None, limit=30) -> List[Dict]:
     with get_conn() as conn:
         select_fields = _select_fields(conn)
         where_kw, p_kw = _build_keywords_or("kw", keywords_any)
+
         sql = f"""
         SELECT {select_fields}
         FROM places
         WHERE
-          (%(cat)s IS NULL OR category ILIKE %(cat_like)s OR name ILIKE %(cat_like)s)
+          (%(cat)s IS NULL OR category ILIKE %(cat_like)s)
           AND (%(tmb)s IS NULL OR tambon ILIKE %(tmb_like)s)
           AND {where_kw}
         ORDER BY name
         LIMIT %(lim)s;
         """
+
         params = {
             "cat": category,
             "tmb": tambon,
@@ -89,15 +127,18 @@ def search_places(category=None, tambon=None, keywords_any=None, limit=30) -> Li
             "lim": limit,
         }
         params.update(p_kw)
+
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
             return cur.fetchall()
+
 
 def search_places_nearby(lat, lng, category=None, tambon=None, keywords_any=None,
                          limit=30, within_km=20) -> List[Dict]:
     with get_conn() as conn:
         select_fields = _select_fields(conn)
         where_kw, p_kw = _build_keywords_or("kw", keywords_any)
+
         sql = f"""
         SELECT
            {select_fields},
@@ -108,7 +149,7 @@ def search_places_nearby(lat, lng, category=None, tambon=None, keywords_any=None
            ) AS distance_km
         FROM places
         WHERE (latitude IS NOT NULL AND longitude IS NOT NULL)
-          AND (%(cat)s IS NULL OR category ILIKE %(cat_like)s OR name ILIKE %(cat_like)s)
+          AND (%(cat)s IS NULL OR category ILIKE %(cat_like)s)
           AND (%(tmb)s IS NULL OR tambon ILIKE %(tmb_like)s)
           AND {where_kw}
           AND (
@@ -121,14 +162,19 @@ def search_places_nearby(lat, lng, category=None, tambon=None, keywords_any=None
         ORDER BY distance_km ASC
         LIMIT %(lim)s;
         """
+
         params = {
-            "lat": lat, "lng": lng,
-            "cat": category, "tmb": tambon,
+            "lat": lat,
+            "lng": lng,
+            "cat": category,
+            "tmb": tambon,
             "cat_like": f"%{category}%" if category else None,
             "tmb_like": f"%{tambon}%" if tambon else None,
-            "within": within_km, "lim": limit,
+            "within": within_km,
+            "lim": limit,
         }
         params.update(p_kw)
+
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
             return cur.fetchall()

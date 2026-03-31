@@ -200,6 +200,19 @@ def _normalize_place_name(s: str) -> str:
     s = _norm(s)
     s = re.sub(r"\s+", "", s)
     return s
+def _normalize_loose_text(s: str) -> str:
+    s = _norm(s)
+    s = re.sub(r"[\s\-_]+", "", s)
+    return s
+
+def _is_similar_name(q: str, candidate: str, threshold: int = 88) -> bool:
+    qn = _normalize_loose_text(q)
+    cn = _normalize_loose_text(candidate)
+    if not qn or not cn:
+        return False
+    if qn == cn:
+        return True
+    return fuzz.ratio(qn, cn) >= threshold
 
 def _split_category_tags(cat_value: str) -> List[str]:
     if not cat_value:
@@ -226,15 +239,27 @@ def _category_matches_intent(place_category: str, intent: Optional[str]) -> bool
 
 def _extract_keywords(user_input: str, llm_keywords: Optional[str]) -> List[str]:
     pool = set()
-    raw = _norm(user_input).replace(",", " ")
-    for tok in raw.split():
-        if len(tok) >= 2 and tok not in STOP_WORDS:
-            pool.add(tok)
-    if llm_keywords:
-        for tok in _norm(llm_keywords).replace(",", " ").split():
+
+    def add_tokens(text: str):
+        text = _norm(text).replace(",", " ")
+        if not text:
+            return
+
+        for tok in text.split():
+            tok = tok.strip()
             if len(tok) >= 2 and tok not in STOP_WORDS:
                 pool.add(tok)
-    return sorted(pool)
+                pool.add(_normalize_loose_text(tok))
+
+        compact = _normalize_loose_text(text)
+        if len(compact) >= 2 and compact not in STOP_WORDS:
+            pool.add(compact)
+
+    add_tokens(user_input)
+    if llm_keywords:
+        add_tokens(llm_keywords)
+
+    return sorted([x for x in pool if x])
 
 def _extract_keywords_for_nearby(user_input: str, llm_keywords: Optional[str], prefer_category: Optional[str]) -> List[str]:
     raw_keywords = _extract_keywords(user_input, llm_keywords)
@@ -414,24 +439,30 @@ def _looks_like_explicit_place_name_query(user_input: str) -> bool:
     return True
 
 def _find_exact_name_matches(user_input: str, rows: List[Dict]) -> List[Dict]:
-    qn = _normalize_place_name(user_input)
+    qn = _normalize_loose_text(user_input)
     if not qn:
         return []
 
     exact = []
+    near_exact = []
+
     for r in rows:
         name = str(r.get("name") or "")
-        if _normalize_place_name(name) == qn:
-            exact.append(r)
+        nn = _normalize_loose_text(name)
 
-    return exact
+        if nn == qn:
+            exact.append(r)
+        elif fuzz.ratio(qn, nn) >= 88:
+            near_exact.append(r)
+
+    return exact if exact else near_exact
 
 def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str], prefer_tambon: Optional[str], top_k: int = 12) -> List[Dict]:
     if not rows:
         return []
 
     q = _norm(query_text)
-    q_norm = _normalize_place_name(query_text)
+    q_norm = _normalize_loose_text(query_text)
     scored = []
 
     for r in rows:
@@ -440,20 +471,43 @@ def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str], pre
         tmb = str(r.get("tambon") or "")
         desc = str(r.get("description") or "")
         hi = str(r.get("highlight") or "")
+
+        name_norm = _normalize_loose_text(name)
         blob = " ".join([name, cat, tmb, desc, hi]).lower()
+        blob_norm = _normalize_loose_text(blob)
 
-        score = fuzz.partial_ratio(q, blob) if q else 0
-        name_norm = _normalize_place_name(name)
+        score = 0
 
-        if q_norm and q_norm == name_norm:
-            score += 1000
-        elif q and q in name.lower():
-            score += 25
+        if q:
+            score += fuzz.partial_ratio(q, blob)
 
-        if prefer_category and _category_matches_intent(cat, prefer_category):
-            score += 22
+        if q_norm and blob_norm:
+            score += int(fuzz.partial_ratio(q_norm, blob_norm) * 0.35)
+
+        if q_norm and name_norm:
+            if q_norm == name_norm:
+                score += 1500
+            else:
+                name_ratio = fuzz.ratio(q_norm, name_norm)
+                if name_ratio >= 92:
+                    score += 700
+                elif name_ratio >= 88:
+                    score += 400
+                elif q_norm in name_norm or name_norm in q_norm:
+                    score += 180
+
+        if q and q in name.lower():
+            score += 40
+
+        if prefer_category:
+            if _category_matches_intent(cat, prefer_category):
+                score += 80
+            else:
+                score -= 500
+
         if prefer_tambon and _norm(prefer_tambon) in tmb.lower():
-            score += 10
+            score += 30
+
         if hi:
             score += 5
         if desc:
