@@ -354,12 +354,12 @@ with st.sidebar:
     st.markdown("**ตัวอย่างคำถาม**")
     st.markdown("""
     <div class="example-bubbles">
-        <div class="example-bubble">มีร้านอาหารแนะนำไหม</div>
-        <div class="example-bubble">ขอคาเฟ่ในปะทิว</div>
-        <div class="example-bubble">ขอที่พักในชุมโค</div>
+        <div class="example-bubble">อยากกินก๋วยเตี๋ยว</div>
+        <div class="example-bubble">ขอคาเฟ่ในชุมโค</div>
+        <div class="example-bubble">ขอที่พักใกล้ หาดทุ่งวัวแล่น</div>
         <div class="example-bubble">มีสถานที่ท่องเที่ยวในสะพลีไหม</div>
-        <div class="example-bubble">บ้านต้นไม้อวดชุมเด่นอะไร</div>
-        <div class="example-bubble">ขอแผนที่ของถ้ำเขาไชย</div>
+        <div class="example-bubble">น้ำมันหมด</div>
+        <div class="example-bubble">7-11ดอนยาง</div>
     </div>
     """, unsafe_allow_html=True)
 
