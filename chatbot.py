@@ -41,6 +41,11 @@ CANON_CATS = [
     "ศูนย์จำหน่ายรถ", "อุตสาหกรรม"
 ]
 
+TAMBON_NAMES = [
+    "ชุมโค", "ดอนยาง", "สะพลี", "บางสน",
+    "ทะเลทรัพย์", "ปากคลอง", "เขาไชยราช", "บางน้ำจืด"
+]
+
 CATEGORY_SYNONYMS = {
     "คาเฟ่": ["คาเฟ่", "ร้านกาแฟ", "ร้านชา", "เครื่องดื่ม", "น้ำปั่น", "ชานม", "ชาเย็น"],
     "ร้านอาหาร": ["ร้านอาหาร", "ร้านข้าว", "ของกิน", "อาหาร", "ของอร่อย"],
@@ -167,11 +172,6 @@ FOLLOWUP_PATTERNS = [
     r"(ราคา|ค่าเข้า|ค่าธรรมเนียม|งบ)$",
     r"(อยู่ไหน|พิกัด|แผนที่|ไปยังไง|เส้นทาง|ที่อยู่)$",
     r"(รูป|ภาพ|มีรูปไหม|ขอรูป|ดูรูป)$",
-]
-
-TAMBON_NAMES = [
-    "ชุมโค", "ดอนยาง", "สะพลี", "บางสน",
-    "ทะเลทรัพย์", "ปากคลอง", "เขาไชยราช", "บางน้ำจืด"
 ]
 
 # ---------- Helpers ----------
@@ -1098,7 +1098,7 @@ def get_answer(
             if exact_matches:
                 return ("นี่คือสถานที่ที่คุณค้นหาครับ", exact_matches[:1], list(banned_set))
 
-        # 2.6) tambon only query
+        # 2.6) ถ้าพิมพ์แค่ชื่อตำบล ให้ถามกลับ
         if _looks_like_tambon_only_query(user_input):
             tambon_name = _normalize_tambon_query(user_input)
             if tambon_name:
@@ -1146,8 +1146,8 @@ def get_answer(
         prefer_category = guessed_cat or u.get("category")
         prefer_tambon = u.get("tambon")
 
-        # ถ้าข้อความนี้ไม่มีตำบล แต่ history ล่าสุดมีตำบล ให้สืบทอดมา
-        if not prefer_tambon:
+        # ถ้าข้อความนี้ไม่มีตำบล แต่ข้อความก่อนหน้าเป็นตำบล ให้จำต่อ
+        if not prefer_tambon and prefer_category:
             history_tambon = _extract_tambon_from_history(history)
             if history_tambon:
                 prefer_tambon = history_tambon
@@ -1215,7 +1215,7 @@ def get_answer(
             ranked = _rank(base2, user_input, prefer_category, prefer_tambon)
             ranked = _post_filter_results_by_query(ranked, user_input, prefer_category)
 
-        # 6) broader fallback by category/context
+        # 6) broader fallback
         if not ranked:
             broader = _broader_category_fallback(
                 user_input=user_input,
@@ -1226,12 +1226,10 @@ def get_answer(
                 banned_set=banned_set
             )
 
-            if broader:
+            if broader and not _is_strict_category(prefer_category):
                 reply = _fallback_reply(user_input, prefer_category)
                 return (reply, broader[:8], list(banned_set))
 
-        # 7) final fallback message (no hard fail)
-        if not ranked:
             return (_fallback_reply(user_input, prefer_category), [], list(banned_set))
 
         reply = _reply_for_found_places(user_input, ranked, prefer_category)
