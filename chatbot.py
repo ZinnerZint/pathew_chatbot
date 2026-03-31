@@ -169,6 +169,13 @@ FOLLOWUP_PATTERNS = [
     r"(รูป|ภาพ|มีรูปไหม|ขอรูป|ดูรูป)$",
 ]
 
+
+
+PHOTO_SPOT_WORDS = [
+    "ถ่ายรูป", "ถ่ายภาพ", "มุมถ่ายรูป", "จุดถ่ายรูป", "วิวสวย", "ถ่ายคอนเทนต์",
+    "ถ่ายเล่น", "ถ่ายรูปสวย", "ถ่ายรูปชิลๆ", "ถ่ายสตอรี่", "ถ่ายรูปลงไอจี", "ถ่ายไอจี"
+]
+
 # ---------- Helpers ----------
 def _safe_json(text: str) -> dict:
     if not text:
@@ -339,6 +346,9 @@ def _forced_category_fallback(user_input: str) -> Optional[str]:
     if any(w in txt for w in ["ทำบุญ", "ไหว้พระ", "วัด", "สำนักสงฆ์"]):
         return "วัด"
 
+    if any(w in txt for w in ["ถ่ายรูป", "ถ่ายภาพ", "มุมถ่ายรูป", "จุดถ่ายรูป", "วิวสวย", "ถ่ายคอนเทนต์", "ถ่ายสตอรี่", "ถ่ายไอจี"]):
+        return "สถานที่ท่องเที่ยว"
+
     if any(w in txt for w in ["น้ำ", "ดื่ม", "กาแฟ", "ชา", "คาเฟ่", "เครื่องดื่ม", "น้ำปั่น", "ชานม", "โกโก้"]):
         return "คาเฟ่"
 
@@ -427,7 +437,7 @@ def _looks_like_explicit_place_name_query(user_input: str) -> bool:
 
     broad_words = [
         "มี", "ไหม", "มั้ย", "แนะนำ", "ใกล้", "ใกล้ๆ", "ที่ไหน",
-        "อะไร", "บ้าง", "ช่วย", "หน่อย", "เอา", "ขอ", "หา",
+        "อะไร", "บ้าง", "ช่วย", "หน่อย", "เอา", "ขอ", "หา", "อยาก", "ไป",
         "ร้าน", "คาเฟ่", "ที่พัก", "ปั๊ม", "ตลาด", "โรงแรม", "รีสอร์ท", "โรงพยาบาล", "คลินิก"
     ]
 
@@ -718,8 +728,23 @@ def _looks_like_map_request(q: str) -> bool:
 
 def _looks_like_image_request(q: str) -> bool:
     q = (q or "").strip().lower()
-    keywords = ["มีรูปไหม", "ขอรูป", "รูป", "ภาพ", "มีภาพไหม", "ดูรูป", "ดูภาพ"]
-    return any(k in q for k in keywords)
+
+    explicit_keywords = [
+        "มีรูปไหม", "ขอรูป", "ดูรูป", "ดูภาพ", "มีภาพไหม",
+        "ส่งรูป", "ขอภาพ", "รูปของ", "ภาพของ"
+    ]
+    if any(k in q for k in explicit_keywords):
+        return True
+
+    # คำว่า "รูป/ภาพ" เดี่ยวๆ มักเป็นคำค้นแนว "ถ่ายรูป" ไม่ควรตีเป็น follow-up ทันที
+    if q in {"รูป", "ภาพ"}:
+        return True
+
+    return False
+
+def _looks_like_photo_spot_query(q: str) -> bool:
+    q = _norm(q)
+    return any(k in q for k in PHOTO_SPOT_WORDS)
 
 def _looks_like_choose_request(q: str) -> bool:
     q = q.strip().lower()
@@ -900,6 +925,9 @@ def _reply_for_found_places(user_input: str, places: List[Dict], category: Optio
 
     if final_category == "คาเฟ่":
         return "ได้เลยครับ นี่คือคาเฟ่ที่น่าสนใจครับ"
+
+    if _looks_like_photo_spot_query(user_input):
+        return "ได้เลยครับ นี่คือสถานที่ที่เหมาะกับการถ่ายรูปในปะทิวครับ"
 
     if final_category == "ปั๊มน้ำมัน":
         return "ตอนนี้มีสถานที่ที่น่าจะตรงกับเรื่องเติมน้ำมันครับ"
@@ -1087,8 +1115,11 @@ def get_answer(
 
             return (_fallback_reply(user_input, prefer_cat), [], list(banned_set))
 
+        # 0.5) generic photo-spot query should be treated as search, not follow-up image request
+        if _looks_like_photo_spot_query(user_input):
+            pass
         # 1) follow-up / map / image
-        if _looks_like_followup(user_input) or _looks_like_map_request(user_input) or _looks_like_image_request(user_input):
+        elif _looks_like_followup(user_input) or _looks_like_map_request(user_input) or _looks_like_image_request(user_input):
             maybe_name = _extract_place_name(user_input)
             place = _pick_focus_place(focus_place_id, last_results, maybe_name)
             if place:
@@ -1147,7 +1178,8 @@ def get_answer(
                 "ชา", "กาแฟ", "ข้าว", "อาหาร", "หิว", "กิน", "ของกิน", "ปั๊ม",
                 "เที่ยว", "ที่พัก", "โรงแรม", "รีสอร์ท", "ยิม", "วัด", "ตลาด", "ยา",
                 "โรงพยาบาล", "คลินิก", "อนามัย", "น้ำ", "เครื่องดื่ม", "น้ำปั่น",
-                "ตัดผม", "เสริมสวย", "บาร์เบอร์", "ทำบุญ", "ไหว้พระ", "ทะเล", "ชายหาด", "หาด", "อ่าว"
+                "ตัดผม", "เสริมสวย", "บาร์เบอร์", "ทำบุญ", "ไหว้พระ", "ทะเล", "ชายหาด", "หาด", "อ่าว",
+                "ถ่ายรูป", "ถ่ายภาพ", "มุมถ่ายรูป", "จุดถ่ายรูป", "วิวสวย"
             ]):
                 u["want_search"] = True
                 u["category"] = guessed_cat or "สถานที่ท่องเที่ยว"
