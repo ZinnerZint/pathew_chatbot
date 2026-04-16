@@ -1,5 +1,4 @@
 streamlit
-google-generativeai
 psycopg2-binary
 requests
 streamlit-javascript
