@@ -497,34 +497,34 @@ def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str], pre
 
         if q_norm and name_norm:
             if q_norm == name_norm:
-                score += 1500
+                score += 1000
             else:
                 name_ratio = fuzz.ratio(q_norm, name_norm)
                 if name_ratio >= 92:
-                    score += 700
+                    score += 800
                 elif name_ratio >= 88:
                     score += 400
                 elif q_norm in name_norm or name_norm in q_norm:
-                    score += 180
+                    score += 200
 
         if q and q in name.lower():
-            score += 40
+            score += 50
 
         if prefer_category:
             if _category_matches_intent(cat, prefer_category):
-                score += 80
+                score += 100
             else:
                 score -= 500
 
         if prefer_tambon and _norm(prefer_tambon) in tmb.lower():
-            score += 30
+            score += 50
 
         if hi:
-            score += 5
+            score += 10
         if desc:
-            score += 4
+            score += 5
         if r.get("image_url"):
-            score += 4
+            score += 5
 
         scored.append((score, r))
 
