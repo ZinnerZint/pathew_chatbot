@@ -207,10 +207,14 @@ def _normalize_place_name(s: str) -> str:
     s = _norm(s)
     s = re.sub(r"\s+", "", s)
     return s
+
 def _normalize_loose_text(s: str) -> str:
     s = _norm(s)
     s = re.sub(r"[\s\-_]+", "", s)
     return s
+
+def _clamp01(x: float) -> float:
+    return max(0.0, min(1.0, x))
 
 def _is_similar_name(q: str, candidate: str, threshold: int = 88) -> bool:
     qn = _normalize_loose_text(q)
@@ -339,34 +343,24 @@ def _intent_from_keywords(user_input: str) -> Optional[str]:
 def _forced_category_fallback(user_input: str) -> Optional[str]:
     txt = _norm(user_input)
 
-    # ต้องเช็กอาหารก่อนคำว่า "ทะเล"
     if any(w in txt for w in ["อาหารทะเล", "ซีฟู้ด", "ของกิน", "หิว", "กิน", "อาหาร", "ข้าว", "ก๋วยเตี๋ยว", "ร้านข้าว"]):
         return "ร้านอาหาร"
-
     if any(w in txt for w in ["ทำบุญ", "ไหว้พระ", "วัด", "สำนักสงฆ์"]):
         return "วัด"
-
     if any(w in txt for w in ["ถ่ายรูป", "ถ่ายภาพ", "มุมถ่ายรูป", "จุดถ่ายรูป", "วิวสวย", "ถ่ายคอนเทนต์", "ถ่ายสตอรี่", "ถ่ายไอจี"]):
         return "สถานที่ท่องเที่ยว"
-
     if any(w in txt for w in ["ดื่ม", "กาแฟ", "คาเฟ่", "เครื่องดื่ม", "ชานม", "โกโก้", "นั่งชิล", "นั่งชิลล์", "ชิล"]):
         return "คาเฟ่"
-
     if any(w in txt for w in ["พัก", "โรงแรม", "รีสอร์ท", "ที่พัก", "โฮมสเตย์"]):
         return "ที่พัก"
-
     if any(w in txt for w in ["คลินิก", "โรงพยาบาล", "อนามัย", "ร้านขายยา", "ร้านยา", "เภสัช"]):
         return "ร้านขายยา"
-
     if any(w in txt for w in ["ตัดผม", "บาร์เบอร์", "เสริมสวย", "ซาลอน"]):
         return "ร้านตัดผม"
-
     if any(w in txt for w in ["อู่", "ซ่อมรถ", "ปะยาง", "แบตเตอรี่", "ร้านยาง"]):
         return "ร้านซ่อมรถ"
-
     if any(w in txt for w in ["ปั๊ม", "เติมน้ำมัน", "น้ำมันหมด"]):
         return "ปั๊มน้ำมัน"
-
     if any(w in txt for w in ["ทะเล", "ชายหาด", "หาด", "อ่าว", "จุดชมวิว", "ที่เที่ยว", "เที่ยว"]):
         return "สถานที่ท่องเที่ยว"
 
@@ -387,7 +381,6 @@ def _infer_category_from_places(places: List[Dict]) -> Optional[str]:
         return None
 
     score_map = {}
-
     for p in places:
         cat = str(p.get("category") or "")
         for canon in CANON_CATS:
@@ -468,13 +461,30 @@ def _find_exact_name_matches(user_input: str, rows: List[Dict]) -> List[Dict]:
 
     return exact if exact else near_exact
 
-def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str], prefer_tambon: Optional[str], top_k: int = 12) -> List[Dict]:
+def _rank(
+    rows: List[Dict],
+    query_text: str,
+    prefer_category: Optional[str],
+    prefer_tambon: Optional[str],
+    top_k: int = 12
+) -> List[Dict]:
     if not rows:
         return []
 
     q = _norm(query_text)
     q_norm = _normalize_loose_text(query_text)
     scored = []
+
+    # ------------------------------
+    # Weighted Scoring Configuration
+    # น้ำหนักรวม = 1.00
+    # ------------------------------
+    W_NAME_SIM = 0.40
+    W_BLOB_SIM = 0.25
+    W_EXACT_NAME = 0.15
+    W_CATEGORY = 0.10
+    W_TAMBON = 0.06
+    W_DETAIL = 0.04
 
     for r in rows:
         name = str(r.get("name") or "")
@@ -487,46 +497,75 @@ def _rank(rows: List[Dict], query_text: str, prefer_category: Optional[str], pre
         blob = " ".join([name, cat, tmb, desc, hi]).lower()
         blob_norm = _normalize_loose_text(blob)
 
-        score = 0
+        # 1) similarity score (0-1)
+        name_similarity = 0.0
+        blob_similarity = 0.0
 
         if q:
-            score += fuzz.partial_ratio(q, blob)
-
-        if q_norm and blob_norm:
-            score += int(fuzz.partial_ratio(q_norm, blob_norm) * 0.35)
+            name_similarity = fuzz.partial_ratio(q, name.lower()) / 100.0
+            blob_similarity = fuzz.partial_ratio(q, blob) / 100.0
 
         if q_norm and name_norm:
+            loose_name_similarity = fuzz.ratio(q_norm, name_norm) / 100.0
+            name_similarity = max(name_similarity, loose_name_similarity)
+
+        if q_norm and blob_norm:
+            loose_blob_similarity = fuzz.partial_ratio(q_norm, blob_norm) / 100.0
+            blob_similarity = max(blob_similarity, loose_blob_similarity)
+
+        name_similarity = _clamp01(name_similarity)
+        blob_similarity = _clamp01(blob_similarity)
+
+        # 2) exact / near exact score (0-1)
+        exact_name_score = 0.0
+        if q_norm and name_norm:
             if q_norm == name_norm:
-                score += 1000
+                exact_name_score = 1.0
             else:
                 name_ratio = fuzz.ratio(q_norm, name_norm)
                 if name_ratio >= 92:
-                    score += 800
+                    exact_name_score = 0.85
                 elif name_ratio >= 88:
-                    score += 400
+                    exact_name_score = 0.70
                 elif q_norm in name_norm or name_norm in q_norm:
-                    score += 200
+                    exact_name_score = 0.50
 
-        if q and q in name.lower():
-            score += 50
+        exact_name_score = _clamp01(exact_name_score)
 
+        # 3) category match (0-1)
+        category_score = 0.0
         if prefer_category:
-            if _category_matches_intent(cat, prefer_category):
-                score += 100
-            else:
-                score -= 500
+            category_score = 1.0 if _category_matches_intent(cat, prefer_category) else 0.0
 
-        if prefer_tambon and _norm(prefer_tambon) in tmb.lower():
-            score += 50
+        # 4) tambon match (0-1)
+        tambon_score = 0.0
+        if prefer_tambon:
+            tambon_score = 1.0 if _norm(prefer_tambon) in tmb.lower() else 0.0
 
+        # 5) detail completeness (0-1)
+        detail_count = 0
         if hi:
-            score += 10
+            detail_count += 1
         if desc:
-            score += 5
+            detail_count += 1
         if r.get("image_url"):
-            score += 5
+            detail_count += 1
 
-        scored.append((score, r))
+        detail_score = detail_count / 3.0
+        detail_score = _clamp01(detail_score)
+
+        # 6) weighted score
+        total_score = (
+            (name_similarity * W_NAME_SIM) +
+            (blob_similarity * W_BLOB_SIM) +
+            (exact_name_score * W_EXACT_NAME) +
+            (category_score * W_CATEGORY) +
+            (tambon_score * W_TAMBON) +
+            (detail_score * W_DETAIL)
+        )
+
+        r["_score"] = round(total_score, 4)
+        scored.append((total_score, r))
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [r for _, r in scored[:top_k]]
@@ -588,19 +627,14 @@ def _fallback_reply(user_input: str, prefer_category: Optional[str]) -> str:
 
     if forced == "วัด":
         return "ตอนนี้ผมยังไม่พบข้อมูลสถานที่ทำบุญหรือวัดที่ตรงคำนี้ครับ ลองพิมพ์ชื่อตำบลหรือชื่อวัดที่ต้องการเพิ่มได้ครับ "
-
     if forced == "สถานที่ท่องเที่ยว":
         return "ตอนนี้ผมยังไม่พบข้อมูลที่เป็นสถานที่ท่องเที่ยวประเภททะเลหรือชายหาดแบบตรงคำนี้ครับ ลองพิมพ์ชื่อหาด อ่าว หรือชื่อตำบลเพิ่มได้ครับ "
-
     if forced == "คาเฟ่":
         return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ถ้าต้องการ ผมช่วยหาร้านคาเฟ่หรือร้านเครื่องดื่มใกล้เคียงให้ได้นะครับ "
-
     if forced == "ร้านอาหาร":
         return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ผมช่วยหาร้านอาหารใกล้เคียงให้แทนได้นะครับ 🍽"
-
     if forced == "ที่พัก":
         return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ผมช่วยหาที่พักใกล้เคียงให้แทนได้นะครับ "
-
     if forced == "ร้านขายยา":
         return "ผมยังหาไม่เจอแบบตรงคำนี้ครับ แต่ผมช่วยหาร้านขายยา คลินิก หรือโรงพยาบาลใกล้เคียงให้แทนได้นะครับ "
 
@@ -678,7 +712,7 @@ def _understand(user_input: str, history_text: str) -> dict:
         "ถ้ามี keyword สำคัญให้คืน keywords ด้วย. ตอบเฉพาะ JSON."
     )
 
-    prompt = f"""{sys}
+    prompt = f'''{sys}
 บริบทก่อนหน้า: {history_text or "(ไม่มี)"}
 ผู้ใช้: "{user_input}"
 
@@ -689,7 +723,7 @@ def _understand(user_input: str, history_text: str) -> dict:
   "tambon": null,
   "keywords": "ก๋วยเตี๋ยว"
 }}
-"""
+'''
 
     try:
         res = model.generate_content(prompt)
@@ -736,7 +770,6 @@ def _looks_like_image_request(q: str) -> bool:
     if any(k in q for k in explicit_keywords):
         return True
 
-    # คำว่า "รูป/ภาพ" เดี่ยวๆ มักเป็นคำค้นแนว "ถ่ายรูป" ไม่ควรตีเป็น follow-up ทันที
     if q in {"รูป", "ภาพ"}:
         return True
 
@@ -919,34 +952,24 @@ def _reply_for_found_places(user_input: str, places: List[Dict], category: Optio
 
     if final_category == "วัด" or any(w in txt for w in ["ทำบุญ", "ไหว้พระ", "วัด", "สำนักสงฆ์"]):
         return "ได้เลยครับ นี่คือสถานที่สำหรับทำบุญหรือไหว้พระที่ผมหามาให้ครับ"
-
     if final_category == "ร้านอาหาร" or any(w in txt for w in ["หิว", "กิน", "อาหาร", "ของกิน", "ร้านแนะนำ"]):
         return "ได้เลยครับ นี่คือร้านอาหารที่น่าลองในปะทิวครับ"
-
     if final_category == "คาเฟ่":
         return "ได้เลยครับ นี่คือคาเฟ่ที่น่าสนใจครับ"
-
     if _looks_like_photo_spot_query(user_input):
         return "ได้เลยครับ นี่คือสถานที่ที่เหมาะกับการถ่ายรูปในปะทิวครับ"
-
     if final_category == "ปั๊มน้ำมัน":
         return "ตอนนี้มีสถานที่ที่น่าจะตรงกับเรื่องเติมน้ำมันครับ"
-
     if final_category == "สถานที่ท่องเที่ยว":
         return "นี่คือสถานที่ท่องเที่ยวที่ผมหามาให้ครับ"
-
     if final_category == "ที่พัก":
         return "นี่คือที่พักที่ผมหามาให้ครับ"
-
     if final_category == "ร้านขายยา":
         return "นี่คือโรงพยาบาล คลินิก หรือร้านขายยาที่ผมหามาให้ครับ"
-
     if final_category == "โรงยิม":
         return "นี่คือยิมหรือฟิตเนสที่ผมหามาให้ครับ"
-
     if final_category == "ร้านตัดผม":
         return "นี่คือร้านตัดผมหรือร้านเสริมสวยที่ผมหามาให้ครับ"
-
     if final_category == "ตลาด":
         return "นี่คือตลาดที่ผมหามาให้ครับ"
 
@@ -1074,7 +1097,6 @@ def get_answer(
         newly_banned = _extract_ban_categories(user_input, last_results)
         banned_set.update(newly_banned)
 
-        # 0) choose detection
         if _looks_like_choose_request(user_input):
             usable = _apply_banned(last_results, banned_set)
 
@@ -1115,10 +1137,8 @@ def get_answer(
 
             return (_fallback_reply(user_input, prefer_cat), [], list(banned_set))
 
-        # 0.5) generic photo-spot query should be treated as search, not follow-up image request
         if _looks_like_photo_spot_query(user_input):
             pass
-        # 1) follow-up / map / image
         elif _looks_like_followup(user_input) or _looks_like_map_request(user_input) or _looks_like_image_request(user_input):
             maybe_name = _extract_place_name(user_input)
             place = _pick_focus_place(focus_place_id, last_results, maybe_name)
@@ -1129,7 +1149,6 @@ def get_answer(
                     return (f"นี่คือรูปหรือแผนที่ของ **{place.get('name', 'สถานที่นี้')}** ครับ", [place], list(banned_set))
                 return (_format_place_answer_from_existing_fields(place, user_input), [place], list(banned_set))
 
-        # 2) nearby-followup from focused place
         maybe_named_place = _extract_place_name(user_input)
         focus_place = _pick_focus_place(focus_place_id, last_results, maybe_named_place)
 
@@ -1142,7 +1161,6 @@ def get_answer(
                 within_km=5.0
             )
 
-        # 2.5) exact place-name match first
         if _looks_like_explicit_place_name_query(user_input):
             q_compact = _normalize_loose_text(user_input)
             exact_candidates = search_places(
@@ -1158,10 +1176,8 @@ def get_answer(
                 ranked_exact = _rank(exact_matches, user_input, None, None, top_k=5)
                 return ("นี่คือสถานที่ที่คุณค้นหาครับ", ranked_exact[:1], list(banned_set))
 
-        # 3) intent logic from LLM
         u = _understand(user_input, history_text)
 
-        # 4) stronger heuristics
         guessed_cat = (
             _forced_category_fallback(user_input)
             or _intent_from_keywords(user_input)
@@ -1187,7 +1203,6 @@ def get_answer(
         if not u.get("want_search"):
             return (_reply_chitchat(user_input, history_text), [], list(banned_set))
 
-        # 5) Search
         prefer_category = guessed_cat or u.get("category")
         prefer_tambon = u.get("tambon")
         keywords = _extract_keywords(user_input, u.get("keywords"))
@@ -1259,7 +1274,6 @@ def get_answer(
             ranked = _rank(base2, user_input, prefer_category, prefer_tambon)
             ranked = _post_filter_results_by_query(ranked, user_input, prefer_category)
 
-        # 6) broader fallback by category/context
         if not ranked:
             broader = _broader_category_fallback(
                 user_input=user_input,
@@ -1274,7 +1288,6 @@ def get_answer(
                 reply = _fallback_reply(user_input, prefer_category)
                 return (reply, broader[:8], list(banned_set))
 
-        # 7) final fallback message (no hard fail)
         if not ranked:
             return (_fallback_reply(user_input, prefer_category), [], list(banned_set))
 
